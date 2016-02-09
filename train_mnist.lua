@@ -3,6 +3,7 @@ require 'optim'
 require 'distributions'
 require 'gnuplot'
 require 'hdf5'
+torch.setnumthreads(4)
 f = hdf5.open('mnist.hdf5')
 mnist_data = f:read():all()
 mask = mnist_data.t_train:ne(8):reshape(50000,1):expandAs(mnist_data.x_train)
@@ -89,7 +90,7 @@ config = {
     learningRate  = 1e-3
     }
 local num_steps = 1e6
-local refresh = 5e2
+local refresh = 1e2
 local cumloss =0 
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()

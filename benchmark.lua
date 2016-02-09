@@ -20,7 +20,7 @@ cmd:option('-double', false, 'use doubles instead of floats')
 cmd:option('-cuda', false, 'use CUDA instead of floats')
 cmd:option('-gi', false, 'compute gradInput')
 cmd:option('-v', false, 'be verbose')
-cmd:option('-batch', 1, 'batch size')
+cmd:option('-batch', 32, 'batch size')
 cmd:option('-iter', 1, 'number of iterations to perform')
 cmd:option('-hooks', false, 'add hooks useful for debug')
 
