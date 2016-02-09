@@ -1,3 +1,4 @@
+require 'torch'
 timer = torch.Timer()
 refresh = 1e3
 for i=1,1e10 do

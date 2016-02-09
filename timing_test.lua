@@ -3,8 +3,6 @@ require 'optim'
 require 'distributions'
 require 'gnuplot'
 require 'hdf5'
-torch.setnumthreads(1)
---torch.setnumcores(4)
 f = hdf5.open('mnist.hdf5')
 mnist_data = f:read():all()
 mask = mnist_data.t_train:ne(8):reshape(50000,1):expandAs(mnist_data.x_train)
@@ -77,7 +75,7 @@ local train_gen = function(x)
         w:copy(x)
     end
     full_network:zeroGradParameters()
-    network:evaluate()
+    --network:evaluate()
 
     local noise_data = torch.randn(mb_dim,noise_dim)
     target:zero()
@@ -91,19 +89,20 @@ config = {
     learningRate  = 1e-3
     }
 local num_steps = 1e6
-local refresh = 1e2
+local refresh = 1e1
 local cumloss =0 
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 for i=1,num_steps do
     for k=1,1 do
-        x,batchloss = optim.rmsprop(train_dis,w,config)
+        --x,batchloss = optim.rmsprop(train_dis,w,config)
     end
     x,batchloss = optim.rmsprop(train_gen,w,config)
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
+        --[[
         gnuplot.figure(plot2)
         gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
         gnuplot.figure(plot1)
@@ -111,15 +110,16 @@ for i=1,num_steps do
         samples2 = torch.randperm(notnot8:size(1))
         for i=1,mb_dim do
             if i<=mb_dim/2 then
-                data[i] = not8[samples1[i]]
+                data[i] = not8[samples1[i] ]
             else
-                data[i] = notnot8[samples2[i]]
+                data[i] = notnot8[samples2[i] ]
             end 
         end
         output = network:forward(data)
         print(output[{{1,mb_dim/2}}]:sum(),output[{{mb_dim/2+1,-1}}]:sum())
         net_reward = 0
         cumloss = 0
+        --]]
     end
 end
 
