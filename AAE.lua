@@ -1,4 +1,6 @@
 require 'nngraph'
+require 'Reparametrize'
+require 'LinearVA'
 require 'optim'
 require 'distributions'
 require 'gnuplot'
@@ -13,39 +15,43 @@ not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
 notnot8 = mnist_data.x_train[mask:eq(0)]
 notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
 
-hid_dim = 100
+gen_hid_dim = 8
+hid_dim = 1000
 out_dim = 1
 --Discrim
 local input = nn.Identity()()
-local hid_lin = nn.Linear(in_dim,hid_dim)
+local hid_lin = nn.Linear(gen_hid_dim,hid_dim)
 local hid = nn.ReLU()(hid_lin(input))
 local out_lin = nn.Linear(hid_dim,out_dim)
 local output = nn.Sigmoid()(out_lin(hid))
 network = nn.gModule({input},{output})
 --Gen
-noise_dim = 20
-gen_hid_dim = 100
 local input = nn.Identity()()
-local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
-local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
-gen_network = nn.gModule({input},{output})
+local hid = nn.ReLU()(nn.LinearVA(in_dim,hid_dim)(input))
+local mu = nn.LinearVA(hid_dim,gen_hid_dim)(hid)
+local sigma = nn.LinearVA(hid_dim,gen_hid_dim)(hid)
+local gauss = nn.Reparametrize(gen_hid_dim){mu,sigma}
+local output =nn.ReLU()(nn.LinearVA(gen_hid_dim,in_dim)(gauss))
+gen_network = nn.gModule({input},{output,gauss})
 
 --full
-local full_input = nn.Identity()()
-local connect= nn.GradientReversal()(gen_network(full_input))
-local full_out = network(connect)
-full_network = nn.gModule({full_input},{full_out})
+local input = nn.Identity()()
+local recon,hid = gen_network(input):split(2)
+local disc = network(nn.GradientReversal()(hid))
+full_network = nn.gModule({input},{recon,disc})
 
 
 w,dw = full_network:getParameters()
 local timer = torch.Timer()
 local bce_crit = nn.BCECriterion()
+local mse_crit = nn.MSECriterion()
 local net_reward = 0
-local mb_dim = 320
-local data = torch.zeros(mb_dim,in_dim)
+local mb_dim = 32
+local data = torch.zeros(mb_dim,gen_hid_dim)
 local target = torch.zeros(mb_dim,1)
 local mu = torch.randn(in_dim)
 local sigma = torch.rand(in_dim)
+--
 local train_dis = function(x)
     if x ~= w then
         w:copy(x)
@@ -53,15 +59,15 @@ local train_dis = function(x)
     full_network:zeroGradParameters()
     network:training()
     
-    samples = torch.randperm(not8:size(1))
+    local samples = torch.randperm(not8:size(1))
+    local gen_data = torch.zeros(mb_dim/2,in_dim)
     for i=1,mb_dim/2 do
-        data[i] = not8[samples[i]]
+        gen_data[i] = not8[samples[i] ]
     end
     target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
-
-    noise_data = torch.randn(mb_dim/2,noise_dim)
     target[{{mb_dim/2+1,-1}}] = torch.zeros(mb_dim/2)
-    data[{{mb_dim/2+1,-1}}]  = gen_network:forward(noise_data)
+    data[{{1,mb_dim/2}}] = torch.randn(mb_dim/2,gen_hid_dim)
+    data[{{mb_dim/2+1,-1}}]  = gen_network:forward(gen_data)[2]
 
     output = network:forward(data)
     loss = bce_crit:forward(output,target)
@@ -78,12 +84,18 @@ local train_gen = function(x)
     full_network:zeroGradParameters()
     network:evaluate()
 
-    local noise_data = torch.randn(mb_dim,noise_dim)
+    local gen_data = torch.zeros(mb_dim,in_dim)
+    local samples = torch.randperm(not8:size(1))
+    for i=1,mb_dim do
+        gen_data[i] = not8[samples[i] ]
+    end
     target:zero()
-    local output = full_network:forward(noise_data)
-    local loss = bce_crit:forward(output,target)
-    local grad = bce_crit:backward(output,target)
-    full_network:backward(noise_data,grad)
+    local recon,disc = unpack(full_network:forward(gen_data))
+    local recon_loss = mse_crit:forward(recon,gen_data)
+    local recon_grad = mse_crit:backward(recon,gen_data)
+    local disc_loss = bce_crit:forward(disc,target)
+    local disc_grad = bce_crit:backward(disc,target)
+    full_network:backward(gen_data,{recon_grad,disc_grad})
     return loss,dw
 end
 config = {
@@ -95,7 +107,7 @@ local cumloss =0
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 for i=1,num_steps do
-    for k=1,1 do
+    for k=1,5 do
         x,batchloss = optim.rmsprop(train_dis,w,config)
     end
     x,batchloss = optim.rmsprop(train_gen,w,config)
@@ -103,22 +115,25 @@ for i=1,num_steps do
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
-        gnuplot.figure(plot2)
-        gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
         gnuplot.figure(plot1)
         samples1 = torch.randperm(not8:size(1))
         samples2 = torch.randperm(notnot8:size(1))
+        local data = torch.zeros(mb_dim,in_dim)
         for i=1,mb_dim do
             if i<=mb_dim/2 then
-                data[i] = not8[samples1[i]]
+                data[i] = not8[samples1[i] ]
             else
-                data[i] = notnot8[samples2[i]]
+                data[i] = notnot8[samples2[i] ]
             end 
         end
-        output = network:forward(data)
-        print(output[{{1,mb_dim/2}}]:mean(),output[{{mb_dim/2+1,-1}}]:mean())
+        pic,output = unpack(full_network:forward(data))
+        output = output:clone()
+        gnuplot.imagesc(pic[1]:reshape(28,28))
+        output2 = network:forward(torch.randn(mb_dim/2,gen_hid_dim))
+        print(output2:mean(),output[{{1,mb_dim/2}}]:mean(),output[{{mb_dim/2+1,-1}}]:mean())
         net_reward = 0
         cumloss = 0
     end
 end
+--]]
 

@@ -1,5 +1,5 @@
 require 'gnuplot'
-num_state = 100
+num_state = 10
 Q = torch.zeros(num_state,4)
 T = torch.ones(num_state,4)
 correct = torch.ones(num_state)
@@ -18,19 +18,19 @@ epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 1e3
-rmax = true
+refresh = 1e4
+--rmax = true
 C = torch.zeros(num_state,4)
-thresh = 1
+thresh = 10
 D = {}
-D.size = 1e3
+D.size = 1e6
 D.s = torch.zeros(D.size)
 D.a = torch.zeros(D.size)
 D.r = torch.zeros(D.size)
 D.sPrime = torch.zeros(D.size)
 D.i = 1
 mb_dim = 32
-for t=1,1e6 do
+for t=1,1e9 do
     r = 0
     --select action
     if rmax then
@@ -49,7 +49,7 @@ for t=1,1e6 do
     else
         _,a = torch.max(Q[s],1)
         a = a[1]
-        a = correct[s]
+        --a = correct[s]
     end
 
     --perform action
@@ -79,9 +79,11 @@ for t=1,1e6 do
                 for j = 1,4 do
                     a = j
                     if C[s][a] < thresh then
-                        r = (1-gamma)*1
                         sPrime = s
-                        Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
+                        --r = (1-gamma)*1
+                        --Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
+                        r = 1
+                        Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*r
                     end
                 end
                 --only experienced actions can be updated over threshold
@@ -89,13 +91,21 @@ for t=1,1e6 do
                 if C[s][a] >= thresh then
                     r = D.r[mb_ind[i]]
                     sPrime = D.sPrime[mb_ind[i]]
-                    Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
+                    if s == num_state then
+                        Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*r
+                    else
+                        Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
+                    end
                 end
             else
                 r = D.r[mb_ind[i]]
                 sPrime = D.sPrime[mb_ind[i]]
                 a = D.a[mb_ind[i]]
-                Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
+                if s == num_state then
+                    Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*r
+                else
+                    Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
+                end
             end
         end
     end
@@ -103,8 +113,8 @@ for t=1,1e6 do
 
     if t % refresh == 0 then
         print(t,net_reward/refresh)
-        gnuplot.plot(C:sum(2))
-        print(Q)
+        --gnuplot.plot(C:sum(2))
+        gnuplot.plot(Q:max(2):double())
         if net_reward/refresh > ((1/num_state)*(1-epsilon)) then
             break
         end
