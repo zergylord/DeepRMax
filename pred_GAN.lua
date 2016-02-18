@@ -4,14 +4,20 @@ require 'distributions'
 require 'gnuplot'
 require 'hdf5'
 torch.setnumthreads(1)
-f = hdf5.open('mnist.hdf5')
-mnist_data = f:read():all()
-mask = mnist_data.t_train:ne(8):reshape(50000,1):expandAs(mnist_data.x_train)
-not8 = mnist_data.x_train[mask]
-in_dim = mnist_data.x_train:size(2)
-not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
-notnot8 = mnist_data.x_train[mask:eq(0)]
-notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
+
+digit = torch.load('digit.t7')
+in_dim = digit[1]:size(2)
+
+num_state = 10
+act_dim = 4
+T = torch.ones(num_state,act_dim)
+correct = torch.ones(num_state)
+for i = 1,num_state-1 do
+    action = torch.random(act_dim)
+    T[i][action] = i+1
+    correct[i] = action
+end
+
 
 hid_dim = 100
 out_dim = 1
@@ -23,18 +29,22 @@ local out_lin = nn.Linear(hid_dim,out_dim)
 local output = nn.Sigmoid()(out_lin(hid))
 network = nn.gModule({input},{output})
 --Gen
-noise_dim = 20
 gen_hid_dim = 100
+fact_dim  = 10
 local input = nn.Identity()()
-local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
-local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
-gen_network = nn.gModule({input},{output})
+local hid = nn.ReLU()(nn.Linear(in_dim,gen_hid_dim)(input))
+local action = nn.Identity()()
+local factor = nn.CMulTable(){nn.Linear(gen_hid_dim,fact_dim)(hid),nn.Linear(act_dim,fact_dim)(action)}
+local last_hid = nn.ReLU()(nn.Linear(fact_dim,gen_hid_dim)(factor))
+local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(last_hid))
+gen_network = nn.gModule({input,action},{output})
 
 --full
-local full_input = nn.Identity()()
-local connect= nn.GradientReversal()(gen_network(full_input))
+local input = nn.Identity()()
+local action = nn.Identity()()
+local connect= nn.GradientReversal()(gen_network{input,action})
 local full_out = network(connect)
-full_network = nn.gModule({full_input},{full_out})
+full_network = nn.gModule({input,action},{full_out})
 
 
 w,dw = full_network:getParameters()
@@ -46,6 +56,26 @@ local data = torch.zeros(mb_dim,in_dim)
 local target = torch.zeros(mb_dim,1)
 local mu = torch.randn(in_dim)
 local sigma = torch.rand(in_dim)
+
+local get_data = function()
+    local state = torch.Tensor(mb_dim,in_dim)
+    local action = torch.zeros(mb_dim,act_dim)
+    local state_prime = torch.Tensor(mb_dim,in_dim)
+    local shuffle = {}
+    for i=1,num_state do
+        shuffle[i] = torch.randperm(digit[i]:size(1))
+    end
+
+    for i=1,mb_dim do
+        local s = torch.random(num_state)
+        state[i] = digit[s][shuffle[s][i] ]
+        local a = torch.random(act_dim)
+        action[i][a] = 1
+        sPrime = T[s][a]
+        state_prime[i] = digit[sPrime][shuffle[sPrime][i] ]
+    end
+    return state,action,state_prime
+end
 local train_dis = function(x)
     if x ~= w then
         w:copy(x)
@@ -53,15 +83,14 @@ local train_dis = function(x)
     full_network:zeroGradParameters()
     network:training()
     
-    samples = torch.randperm(not8:size(1))
+    state,action,state_prime = get_data()
     for i=1,mb_dim/2 do
-        data[i] = not8[samples[i]]
+        data[i] = state_prime[i]
     end
     target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
-
-    noise_data = torch.randn(mb_dim/2,noise_dim)
     target[{{mb_dim/2+1,-1}}] = torch.zeros(mb_dim/2)
-    data[{{mb_dim/2+1,-1}}]  = gen_network:forward(noise_data)
+
+    data[{{mb_dim/2+1,-1}}]  = gen_network:forward{state[{{1,mb_dim/2}}],action[{{1,mb_dim/2}}]}
 
     output = network:forward(data)
     loss = bce_crit:forward(output,target)
@@ -71,6 +100,7 @@ local train_dis = function(x)
     net_reward = net_reward + r
     return loss,dw
 end
+    
 local train_gen = function(x)
     if x ~= w then
         w:copy(x)
@@ -78,13 +108,16 @@ local train_gen = function(x)
     full_network:zeroGradParameters()
     network:evaluate()
 
-    local noise_data = torch.randn(mb_dim,noise_dim)
+    state,action,state_prime = get_data()
     target:zero()
-    local output = full_network:forward(noise_data)
-    local loss = bce_crit:forward(output,target)
-    local grad = bce_crit:backward(output,target)
-    full_network:backward(noise_data,grad)
-    return loss,dw
+    local output = full_network:forward{state,action}
+    local disc_loss = bce_crit:forward(output,target)
+    local disc_grad = bce_crit:backward(output,target):clone()
+    full_network:backward(state,disc_grad)
+    local recon_loss = bce_crit:forward(gen_network.output,state_prime)
+    local recon_grad = bce_crit:backward(gen_network.output,state_prime):clone()
+    gen_network:backward({state,action},recon_grad)
+    return disc_loss+recon_loss,dw
 end
 config = {
     learningRate  = 1e-3
