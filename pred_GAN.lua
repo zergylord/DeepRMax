@@ -57,6 +57,7 @@ local target = torch.zeros(mb_dim,1)
 local mu = torch.randn(in_dim)
 local sigma = torch.rand(in_dim)
 
+local s,a,sPrime
 local get_data = function()
     local state = torch.Tensor(mb_dim,in_dim)
     local action = torch.zeros(mb_dim,act_dim)
@@ -67,9 +68,9 @@ local get_data = function()
     end
 
     for i=1,mb_dim do
-        local s = torch.random(num_state)
+        s = torch.random(num_state)
         state[i] = digit[s][shuffle[s][i] ]
-        local a = torch.random(act_dim)
+        a = torch.random(act_dim)
         action[i][a] = 1
         sPrime = T[s][a]
         state_prime[i] = digit[sPrime][shuffle[sPrime][i] ]
@@ -136,20 +137,8 @@ for i=1,num_steps do
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
-        gnuplot.figure(plot2)
-        gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
-        gnuplot.figure(plot1)
-        samples1 = torch.randperm(not8:size(1))
-        samples2 = torch.randperm(notnot8:size(1))
-        for i=1,mb_dim do
-            if i<=mb_dim/2 then
-                data[i] = not8[samples1[i]]
-            else
-                data[i] = notnot8[samples2[i]]
-            end 
-        end
-        output = network:forward(data)
-        print(output[{{1,mb_dim/2}}]:mean(),output[{{mb_dim/2+1,-1}}]:mean())
+        gnuplot.imagesc(gen_network.output[1]:reshape(28,28))
+        print(s,a,sPrime)
         net_reward = 0
         cumloss = 0
     end
