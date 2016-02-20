@@ -12,10 +12,18 @@ num_state = 10
 act_dim = 4
 T = torch.ones(num_state,act_dim)
 correct = torch.ones(num_state)
+--[[
 for i = 1,num_state-1 do
     action = torch.random(act_dim)
     T[i][action] = i+1
     correct[i] = action
+end
+--]]
+for i = 1,num_state-1 do
+    for j = 1,act_dim do
+        action = j
+        T[i][action] = torch.random(num_state) 
+    end
 end
 
 
