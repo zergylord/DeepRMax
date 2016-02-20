@@ -66,16 +66,16 @@ local mu = torch.randn(in_dim)
 local sigma = torch.rand(in_dim)
 
 local s,a,sPrime
-local get_data = function()
-    local state = torch.Tensor(mb_dim,in_dim)
-    local action = torch.zeros(mb_dim,act_dim)
-    local state_prime = torch.Tensor(mb_dim,in_dim)
+local get_data = function(dim)
+    local state = torch.Tensor(dim,in_dim)
+    local action = torch.zeros(dim,act_dim)
+    local state_prime = torch.Tensor(dim,in_dim)
     local shuffle = {}
     for i=1,num_state do
         shuffle[i] = torch.randperm(digit[i]:size(1))
     end
 
-    for i=1,mb_dim do
+    for i=1,dim do
         s = torch.random(num_state)
         state[i] = digit[s][shuffle[s][i] ]
         a = torch.random(act_dim)
@@ -92,14 +92,14 @@ local train_dis = function(x)
     full_network:zeroGradParameters()
     network:training()
     
-    state,action,state_prime = get_data()
+    state,action,state_prime = get_data(mb_dim/2)
     for i=1,mb_dim/2 do
         data[i] = state_prime[i]
     end
     target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
     target[{{mb_dim/2+1,-1}}] = torch.zeros(mb_dim/2)
 
-    data[{{mb_dim/2+1,-1}}]  = gen_network:forward{state[{{1,mb_dim/2}}],action[{{1,mb_dim/2}}]}
+    data[{{mb_dim/2+1,-1}}]  = gen_network:forward{state,action}
 
     output = network:forward(data)
     loss = bce_crit:forward(output,target)
@@ -117,12 +117,12 @@ local train_gen = function(x)
     full_network:zeroGradParameters()
     network:evaluate()
 
-    state,action,state_prime = get_data()
+    state,action,state_prime = get_data(mb_dim)
     target:zero()
     local output = full_network:forward{state,action}
     local disc_loss = bce_crit:forward(output,target)
     local disc_grad = bce_crit:backward(output,target):clone()
-    full_network:backward(state,disc_grad)
+    --full_network:backward(state,disc_grad)
     local recon_loss = bce_crit:forward(gen_network.output,state_prime)
     local recon_grad = bce_crit:backward(gen_network.output,state_prime):clone()
     gen_network:backward({state,action},recon_grad)
@@ -146,7 +146,7 @@ for i=1,num_steps do
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
         gnuplot.imagesc(gen_network.output[1]:reshape(28,28))
-        print(s,a,sPrime)
+        print(s,a,sPrime,network.output[1])
         net_reward = 0
         cumloss = 0
     end
