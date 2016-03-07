@@ -23,7 +23,7 @@ out_dim = 1
 dropout = true
 dropout_p = .1
 fake_p = .5
-rev_grad = true
+--rev_grad = true
 gen_hid_dim = 100
 --Discrim
 local input = nn.Identity()()
@@ -40,7 +40,7 @@ end
 --one more layer here?
 local out_lin = nn.Linear(hid_dim,out_dim)
 local output = nn.Sigmoid()(out_lin(hid2))
-network = nn.gModule({input,action,sPrime},{output})
+network = nn.gModule({input,action},{output})
 --Gen
 noise_dim = 40
 local input = nn.Identity()()
@@ -72,9 +72,9 @@ local sigma = torch.rand(in_dim)
 
 local s,a,sPrime
 local get_data = function(dim)
-    local state = torch.rand(dim,in_dim):mul(.1)
-    local action = torch.rand(dim,act_dim):mul(.1)
-    local state_prime = torch.rand(dim,in_dim):mul(.1)
+    local state = torch.rand(dim,in_dim):mul(0)
+    local action = torch.rand(dim,act_dim):mul(0)
+    local state_prime = torch.rand(dim,in_dim):mul(0)
 
     for i=1,dim do
         s = torch.random(num_state)
@@ -166,8 +166,11 @@ local train_gen = function(x)
     --]]
     return disc_loss+recon_loss,dw
 end
-config = {
-    learningRate  = 1e-5
+config_dis = {
+    learningRate  = 1e-3
+    }
+config_gen = {
+    learningRate  = 1e-3
     }
 local num_steps = 1e6
 local refresh = 1e3
@@ -176,9 +179,9 @@ local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 for i=1,num_steps do
     for k=1,5 do
-        x,batchloss = optim.adam(train_dis,w,config)
+        x,batchloss = optim.adam(train_dis,w,config_dis)
     end
-    x,batchloss = optim.adam(train_gen,w,config)
+    x,batchloss = optim.adam(train_gen,w,config_gen)
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
