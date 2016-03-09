@@ -5,8 +5,10 @@ require 'gnuplot'
 require 'hdf5'
 --torch.setnumthreads(1)
 
+digit = torch.load('digit.t7')
+in_dim = digit[1]:size(2)
+
 num_state = 10
-in_dim = num_state 
 
 act_dim = 4
 T = torch.ones(num_state,act_dim)
@@ -111,37 +113,41 @@ local sigma = torch.rand(in_dim)
 local s,a,sPrime
 local noise_level = .45
 local get_data = function(dim)
-    --local state = torch.rand(dim,in_dim):mul(noise_level)
-    --local action = torch.rand(dim,act_dim):mul(noise_level)
-    local state = torch.zeros(dim,in_dim)
+    local state = torch.Tensor(dim,in_dim)
     local action = torch.zeros(dim,act_dim)
-    local state_prime = torch.rand(dim,in_dim):mul(noise_level)
+    local state_prime = torch.Tensor(dim,in_dim)
+    local shuffle = {}
+    for i=1,num_state do
+        shuffle[i] = torch.randperm(digit[i]:size(1))
+    end
 
     for i=1,dim do
-        s = torch.random(num_state-2)
-        state[i][s] = 1---torch.rand(1):mul(noise_level)[1]
+        s = torch.random(num_state)
+        state[i] = digit[s][shuffle[s][i] ]
         a = torch.random(act_dim)
-        action[i][a] = 1---torch.rand(1):mul(noise_level)[1]
+        action[i][a] = 1
         sPrime = T[s][a]
-        state_prime[i][sPrime] = 1-torch.rand(1):mul(noise_level)[1]
+        state_prime[i] = digit[sPrime][shuffle[sPrime][i] ]
     end
     return state,action,state_prime
 end
 local get_complete_data = function()
     local dim = num_state*act_dim
-    --local state = torch.rand(dim,in_dim):mul(noise_level)
-    --local action = torch.rand(dim,act_dim):mul(noise_level)
-    local state = torch.zeros(dim,in_dim)
+    local state = torch.Tensor(dim,in_dim)
     local action = torch.zeros(dim,act_dim)
-    local state_prime = torch.rand(dim,in_dim):mul(noise_level)
+    local state_prime = torch.Tensor(dim,in_dim)
+    local shuffle = {}
+    for i=1,num_state do
+        shuffle[i] = torch.randperm(digit[i]:size(1))
+    end
 
     for a=1,act_dim do
         for s=1,num_state do
             local i = num_state*(a-1)+s
-            state[i][s] = 1---torch.rand(1):mul(noise_level)[1]
-            action[i][a] = 1---torch.rand(1):mul(noise_level)[1]
+            state[i] = digit[s][shuffle[s][i] ]
+            action[i][a] = 1
             sPrime = T[s][a]
-            state_prime[i][sPrime] = 1-torch.rand(1):mul(noise_level)[1]
+            state_prime[i] = digit[sPrime][shuffle[sPrime][i] ]
         end
     end
     return state,action,state_prime
@@ -207,6 +213,9 @@ local refresh = 1e3
 local cumloss =0 
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
+local plot3 = gnuplot.figure()
+local plot4 = gnuplot.figure()
+local plot5 = gnuplot.figure()
 for i=1,num_steps do
     for k=1,5 do
         x,batchloss = optim.adam(train_dis,w,config_dis)
@@ -225,11 +234,20 @@ for i=1,num_steps do
             y[{{40*(i-1)+1,40*i}}] = output:clone()
         end
         gnuplot.figure(plot1)
+        --[[
         gnuplot.imagesc(gen_network.output[{{1,num_state}}]+
                         gen_network.output[{{num_state+1,num_state*2}}]+
                         gen_network.output[{{num_state*2+1,num_state*3}}]+
                         gen_network.output[{{num_state*3+1,-1}}]
                         )
+                        --]]
+        gnuplot.imagesc(gen_network.output[1]:reshape(28,28))
+        gnuplot.figure(plot3)
+        gnuplot.imagesc(gen_network.output[1+num_state]:reshape(28,28))
+        gnuplot.figure(plot4)
+        gnuplot.imagesc(gen_network.output[1+num_state*2]:reshape(28,28))
+        gnuplot.figure(plot5)
+        gnuplot.imagesc(gen_network.output[1+num_state*3]:reshape(28,28))
         gnuplot.figure(plot2)
         --[[
         gnuplot.imagesc(state_prime[{{1,num_state}}]+

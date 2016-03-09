@@ -18,37 +18,28 @@ for i = 1,num_state-1 do
 end
 
 
-hid_dim = 10
+hid_dim = 100
 out_dim = 1
-dropout = true
 dropout_p = .1
 fake_p = .5
 --rev_grad = true
-gen_hid_dim = 10
+gen_hid_dim = 100
 --Discrim
 local input = nn.Identity()()
 local action = nn.Identity()()
-if dropout then
-    print('dropout')
-    hid = nn.Dropout(dropout_p)(nn.ReLU()(nn.Linear(in_dim+act_dim,hid_dim)(nn.JoinTable(2){input,action})))
-    hid2 = nn.Dropout(dropout_p)(nn.ReLU()(nn.Linear(hid_dim,hid_dim)(hid)))
-else
-    print('no dropout')
-    hid = (nn.ReLU()(nn.Linear(in_dim+act_dim,hid_dim)(nn.JoinTable(2){input,action})))
-    hid2 = (nn.ReLU()(nn.Linear(hid_dim,hid_dim)(hid)))
-end
+local prime = nn.Identity()()
+hid = nn.Dropout(dropout_p)(nn.ReLU()(nn.Linear(in_dim+act_dim+in_dim,hid_dim)(nn.JoinTable(2){input,action,prime})))
+hid2 = nn.Dropout(dropout_p)(nn.ReLU()(nn.Linear(hid_dim,hid_dim)(hid)))
 --one more layer here?
 local out_lin = nn.Linear(hid_dim,out_dim)
 local output = nn.Sigmoid()(out_lin(hid2))
 network = nn.gModule({input,action},{output})
 --Gen
-noise_dim = 10
 local input = nn.Identity()()
-local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
+local hid = nn.ReLU()(nn.Linear(in_dim+act_dim,gen_hid_dim)(nn.JoinTable(2){input,action}))
 local last_hid = nn.ReLU()(nn.Linear(gen_hid_dim,gen_hid_dim)(hid))
 local output =nn.Sigmoid()(nn.Linear(gen_hid_dim,in_dim)(last_hid))
-local action = nn.Sigmoid()(nn.Linear(gen_hid_dim,act_dim)(last_hid))
-gen_network = nn.gModule({input},{output,action})
+gen_network = nn.gModule({input},{output})
 --full
 local input = nn.Identity()()
 if rev_grad then
@@ -125,6 +116,7 @@ local train_dis = function(x)
     for i=1,num_real do
         data[i] = state[i]
         data_a[i] = action[i]
+        data_prime[i] = action[i]
     end
     target[{{1,num_real}}] = torch.ones(num_real)
     target[{{num_real+1,-1}}] = torch.zeros(num_fake)
@@ -178,7 +170,7 @@ local cumloss =0
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 for i=1,num_steps do
-    for k=1,10 do
+    for k=1,5 do
         x,batchloss = optim.adam(train_dis,w,config_dis)
     end
     x,batchloss = optim.adam(train_gen,w,config_gen)

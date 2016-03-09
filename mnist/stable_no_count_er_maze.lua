@@ -10,12 +10,10 @@ in_dim = digit[1]:size(2)
 
 hid_dim = 100
 out_dim = 1
-dropout_p = .1
---rev_grad = true
 --Discrim
 local input = nn.Identity()()
 local hid_lin = nn.Linear(in_dim,hid_dim)
-local hid = nn.Dropout(dropout_p)(nn.ReLU()(hid_lin(input)))
+local hid = nn.Dropout()(nn.ReLU()(hid_lin(input)))
 local out_lin = nn.Linear(hid_dim,out_dim)
 local output = nn.Sigmoid()(out_lin(hid))
 network = nn.gModule({input},{output})
@@ -29,12 +27,7 @@ gen_network = nn.gModule({input},{output})
 
 --full
 local full_input = nn.Identity()()
-local connect
-if rev_grad then
-    connect= nn.GradientReversal()(gen_network(full_input))
-else
-    connect= gen_network(full_input)
-end
+local connect= nn.GradientReversal()(gen_network(full_input))
 local full_out = network(connect)
 full_network = nn.gModule({full_input},{full_out})
 
@@ -85,21 +78,14 @@ local train_gen = function(x)
     network:evaluate()
 
     local noise_data = torch.randn(mb_dim,noise_dim)
-    if rev_grad then
-        target:zero()
-    else
-        target:zero():add(1)
-    end
+    target:zero()
     local output = full_network:forward(noise_data)
     local loss = bce_crit:forward(output,target)
     local grad = bce_crit:backward(output,target)
     full_network:backward(noise_data,grad)
     return loss,dw
 end
-config_dis = {
-    learningRate  = 1e-3
-    }
-config_gen = {
+config = {
     learningRate  = 1e-3
     }
 local num_steps = 1e6
@@ -185,11 +171,11 @@ for t=1,num_steps do
     --update model params
     if t > mb_dim then
         --update adver nets
-        for k=1,5 do
+        for k=1,1 do
             mb_ind = torch.randperm(math.min(t,D.size))
-            x,batchloss = optim.rmsprop(train_dis,w,config_dis)
+            x,batchloss = optim.rmsprop(train_dis,w,config)
         end
-        x,batchloss = optim.rmsprop(train_gen,w,config_gen)
+        x,batchloss = optim.rmsprop(train_gen,w,config)
         cumloss = cumloss + batchloss[1]
         --update Q
         for i = 1,mb_dim do
@@ -266,6 +252,7 @@ for t=1,num_steps do
         --gnuplot.bar(true_C)
         local bonus = hist_thresh:cdiv(hist_total+1)
         gnuplot.plot({bonus:mean(2)},{bonus:max(2):double()},{bonus:min(2):double()}) --dont divide by zero
+        --gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
         hist_thresh:zero()
         --true_C:zero()
         
@@ -276,9 +263,6 @@ for t=1,num_steps do
 
         hist_known:zero()
         hist_total:zero()
-        
-        gnuplot.figure(plot4)
-        gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
 
 
         print(thresh,t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)

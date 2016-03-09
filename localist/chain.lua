@@ -4,6 +4,7 @@ require 'distributions'
 require 'gnuplot'
 require 'hdf5'
 --torch.setnumthreads(1)
+T = torch.range(2,9):cat(torch.ones(1))
 
 num_state = 10
 in_dim = num_state 

@@ -13,8 +13,9 @@ not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
 notnot8 = mnist_data.x_train[mask:eq(0)]
 notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
 
-hid_dim = 100
+hid_dim = 1200
 out_dim = 1
+--rev_grad = true
 --Discrim
 local input = nn.Identity()()
 local hid_lin = nn.Linear(in_dim,hid_dim)
@@ -24,7 +25,7 @@ local output = nn.Sigmoid()(out_lin(hid))
 network = nn.gModule({input},{output})
 --Gen
 noise_dim = 20
-gen_hid_dim = 100
+gen_hid_dim = 1200
 local input = nn.Identity()()
 local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
 local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
@@ -32,7 +33,11 @@ gen_network = nn.gModule({input},{output})
 
 --full
 local full_input = nn.Identity()()
-local connect= nn.GradientReversal()(gen_network(full_input))
+if rev_grad then
+    connect= nn.GradientReversal()(gen_network(full_input))
+else
+    connect= gen_network(full_input)
+end
 local full_out = network(connect)
 full_network = nn.gModule({full_input},{full_out})
 
@@ -79,14 +84,21 @@ local train_gen = function(x)
     network:evaluate()
 
     local noise_data = torch.randn(mb_dim,noise_dim)
-    target:zero()
+    if rev_grad then
+        target:zero()
+    else
+        target:zero():add(1)
+    end
     local output = full_network:forward(noise_data)
     local loss = bce_crit:forward(output,target)
     local grad = bce_crit:backward(output,target)
     full_network:backward(noise_data,grad)
     return loss,dw
 end
-config = {
+config_dis = {
+    learningRate  = 1e-3
+    }
+config_gen = {
     learningRate  = 1e-3
     }
 local num_steps = 1e6
@@ -95,10 +107,10 @@ local cumloss =0
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 for i=1,num_steps do
-    for k=1,1 do
-        x,batchloss = optim.rmsprop(train_dis,w,config)
+    for k=1,5 do
+        x,batchloss = optim.rmsprop(train_dis,w,config_dis)
     end
-    x,batchloss = optim.rmsprop(train_gen,w,config)
+    x,batchloss = optim.rmsprop(train_gen,w,config_gen)
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)

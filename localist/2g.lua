@@ -48,13 +48,22 @@ local mb_dim = num_state*1
 local target = torch.zeros(mb_dim,1)
 
 local s
-local noise_level = .25
+local points = torch.linspace(0,10,num_state)
+local state_dict = torch.zeros(2,num_state)
+local mu,sigma = 3,1
+for i=1,num_state do
+    state_dict[1][i] = distributions.norm.pdf(points[i],mu,sigma)
+end
+mu = 7
+sigma = 2
+for i=1,num_state do
+    state_dict[2][i] = distributions.norm.pdf(points[i],mu,sigma)
+end
 local get_data = function(dim)
-    local state = torch.rand(dim,in_dim):mul(noise_level)
-
+    local state = torch.zeros(dim,num_state)
     for i=1,dim do
-        s = torch.random(num_state)
-        state[i][s] = 1-torch.rand(1):mul(noise_level)[1]
+        local s = torch.random(2)
+        state[i] = torch.add(state_dict[s],torch.rand(num_state):mul(.4))
     end
     return state
 end
@@ -63,8 +72,8 @@ local get_noise = function(dim)
     for i=1,dim do
         noise[i][torch.random(noise_dim)] = 1
     end
-    return torch.randn(dim,noise_dim)
-    --return noise
+    --return torch.randn(dim,noise_dim)
+    return noise
 end
 local get_complete_data = function()
     return torch.eye(num_state)
@@ -144,7 +153,8 @@ for i=1,num_steps do
 
         gnuplot.figure(plot2)
         --gnuplot.bar(gen_network.output[1])
-        gnuplot.imagesc(gen_network.output)
+        --gnuplot.imagesc(gen_network.output)
+        gnuplot.splot(gen_network.output)
         gnuplot.plotflush()
         net_reward = 0
         cumloss = 0
