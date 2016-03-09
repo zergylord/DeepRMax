@@ -1,3 +1,4 @@
+require 'cunn'
 require 'nngraph'
 require 'optim'
 require 'distributions'
@@ -13,28 +14,49 @@ not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
 notnot8 = mnist_data.x_train[mask:eq(0)]
 notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
 
-hid_dim = 1200
+use_gpu = true
+if use_gpu then
+    notnot8 = notnot8:cuda()
+    not8 = not8:cuda()
+end
+hid_dim = 500
 out_dim = 1
 --rev_grad = true
---Discrim
-local input = nn.Identity()()
-local hid_lin = nn.Linear(in_dim,hid_dim)
-local hid = nn.ReLU()(hid_lin(input))
-local out_lin = nn.Linear(hid_dim,out_dim)
-local output = nn.Sigmoid()(out_lin(hid))
-network = nn.gModule({input},{output})
---Gen
-noise_dim = 20
-gen_hid_dim = 1200
-local input = nn.Identity()()
-local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
-local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
-gen_network = nn.gModule({input},{output})
-
+if use_gpu then
+    --Discrim
+    local input = nn.Identity():cuda()()
+    local hid_lin = nn.Linear(in_dim,hid_dim):cuda()
+    local hid = nn.ReLU():cuda()(hid_lin(input))
+    local out_lin = nn.Linear(hid_dim,out_dim):cuda()
+    local output = nn.Sigmoid():cuda()(out_lin(hid))
+    network = nn.gModule({input},{output})
+    --Gen
+    noise_dim = 20
+    gen_hid_dim = 1200
+    local input = nn.Identity():cuda()()
+    local hid = nn.ReLU():cuda()(nn.Linear(noise_dim,gen_hid_dim):cuda()(input))
+    local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,in_dim):cuda()(hid))
+    gen_network = nn.gModule({input},{output})
+else
+    --Discrim
+    local input = nn.Identity()()
+    local hid_lin = nn.Linear(in_dim,hid_dim)
+    local hid = nn.ReLU()(hid_lin(input))
+    local out_lin = nn.Linear(hid_dim,out_dim)
+    local output = nn.Sigmoid()(out_lin(hid))
+    network = nn.gModule({input},{output})
+    --Gen
+    noise_dim = 20
+    gen_hid_dim = 1200
+    local input = nn.Identity()()
+    local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
+    local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
+    gen_network = nn.gModule({input},{output})
+end
 --full
 local full_input = nn.Identity()()
 if rev_grad then
-    connect= nn.GradientReversal()(gen_network(full_input))
+    connect= nn.GradientReversal():cuda()(gen_network(full_input))
 else
     connect= gen_network(full_input)
 end
@@ -43,12 +65,22 @@ full_network = nn.gModule({full_input},{full_out})
 
 
 w,dw = full_network:getParameters()
+print(w:type())
 local timer = torch.Timer()
-local bce_crit = nn.BCECriterion()
+if use_gpu then
+    bce_crit = nn.BCECriterion():cuda()
+else
+    bce_crit = nn.BCECriterion()
+end
 local net_reward = 0
 local mb_dim = 320
-local data = torch.zeros(mb_dim,in_dim)
-local target = torch.zeros(mb_dim,1)
+if use_gpu then
+    data = torch.zeros(mb_dim,in_dim):cuda()
+    target = torch.zeros(mb_dim,1):cuda()
+else
+    data = torch.zeros(mb_dim,in_dim)
+    target = torch.zeros(mb_dim,1)
+end
 local mu = torch.randn(in_dim)
 local sigma = torch.rand(in_dim)
 local train_dis = function(x)
@@ -62,9 +94,14 @@ local train_dis = function(x)
     for i=1,mb_dim/2 do
         data[i] = not8[samples[i]]
     end
-    target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
+    if use_gpu then
+        target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2):cuda()
+        noise_data = torch.randn(mb_dim/2,noise_dim):cuda()
+    else
+        target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
+        noise_data = torch.randn(mb_dim/2,noise_dim)
+    end
 
-    noise_data = torch.randn(mb_dim/2,noise_dim)
     target[{{mb_dim/2+1,-1}}] = torch.zeros(mb_dim/2)
     data[{{mb_dim/2+1,-1}}]  = gen_network:forward(noise_data)
 
@@ -82,8 +119,12 @@ local train_gen = function(x)
     end
     full_network:zeroGradParameters()
     network:evaluate()
-
-    local noise_data = torch.randn(mb_dim,noise_dim)
+    local noise_data
+    if use_gpu then
+        noise_data = torch.randn(mb_dim,noise_dim):cuda()
+    else
+        noise_data = torch.randn(mb_dim,noise_dim)
+    end
     if rev_grad then
         target:zero()
     else
