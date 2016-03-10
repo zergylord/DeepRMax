@@ -1,6 +1,6 @@
---use_gpu = true
+use_gpu = true
 --rev_grad = true
---use_action = true
+use_action = true
 if use_gpu then
     require 'cunn'
 end
@@ -30,10 +30,10 @@ if use_gpu then
     notnot8 = notnot8:cuda()
     not8 = not8:cuda()
 end
-hid_dim = 1200
+hid_dim = 120
 noise_dim = 10
 gen_hid_dim = 1200
-dropout = 0
+dropout = .1
 mb_dim = 100
 out_dim = 1
 if use_gpu then
@@ -46,20 +46,20 @@ if use_gpu then
     network = nn.gModule({input},{output})
     --Gen
     local input = nn.Identity():cuda()()
-    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(nn.Linear(noise_dim,gen_hid_dim):cuda()(input))))
+    local hid = nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(nn.Linear(noise_dim,gen_hid_dim):cuda()(input)))
     local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,in_dim):cuda()(hid))
     gen_network = nn.gModule({input},{output})
 else
     --Discrim
     local input = nn.Identity()()
     local hid_lin = nn.Linear(in_dim,hid_dim)
-    local hid = nn.Dropout(dropout)(nn.ReLU()(hid_lin(input)))
+    local hid = nn.ReLU()(hid_lin(input))
     local out_lin = nn.Linear(hid_dim,out_dim)
-    local output = (nn.Sigmoid()(out_lin(hid)))
+    local output = nn.Sigmoid()(out_lin(hid))
     network = nn.gModule({input},{output})
     --Gen
     local input = nn.Identity()()
-    local hid = nn.BatchNormalization(gen_hid_dim)(nn.Dropout(dropout)(nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))))
+    local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
     local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
     gen_network = nn.gModule({input},{output})
 end
@@ -85,25 +85,13 @@ end
 local net_reward = 0
 if use_gpu then
     data = torch.zeros(mb_dim,in_dim):cuda()
-    dis_target = torch.zeros(mb_dim,1):cuda()
-    dis_target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2):cuda()
-    if rev_grad then
-        gen_target = torch.zeros(mb_dim,1):cuda()
-    else
-        gen_target = torch.ones(mb_dim,1):cuda()
-    end
+    target = torch.zeros(mb_dim,1):cuda()
 else
     data = torch.zeros(mb_dim,in_dim)
-    dis_target = torch.zeros(mb_dim,1)
-    dis_target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
-    if rev_grad then
-        gen_target = torch.zeros(mb_dim,1)
-    else
-        gen_target = torch.ones(mb_dim,1)
-    end
+    target = torch.zeros(mb_dim,1)
 end
-
-
+local mu = torch.randn(in_dim)
+local sigma = torch.rand(in_dim)
 local get_noise = function(dim)
     --one-hot noise
     local noise = torch.zeros(dim,noise_dim)
@@ -113,72 +101,55 @@ local get_noise = function(dim)
     --just gaussian
     return torch.randn(dim,noise_dim)
 end
---[[ takes a view of the memory 
-    and fills it with data
---]]
-local get_data = function(data)
-    local samples = torch.randperm(not8:size(1))
-    --local data = torch.zeros(num,dim)
-    num = data:size(1)
-    dim = data:size(2)
-    for i=1,num do
+local train_dis = function(x)
+    gen_network:evaluate()
+    samples = torch.randperm(not8:size(1))
+    for i=1,mb_dim/2 do
         if use_action then
-            data[i] = not8[samples[i] ]:cat(act_dict[torch.random(act_dim)])
+            data[i] = not8[samples[i]]:cat(act_dict[torch.random(act_dim)])
         else
-            data[i] = not8[samples[i] ]
+            data[i] = not8[samples[i]]
         end
     end
-end
-
-local train_dis = function()
-    --gen_network:evaluate()
-    data_func(data[{{1,mb_dim/2}}])
-
-    local noise_data
     if use_gpu then
+        target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2):cuda()
         noise_data = get_noise(mb_dim/2):cuda()
     else
+        target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
         noise_data = get_noise(mb_dim/2)
     end
 
+    target[{{mb_dim/2+1,-1}}] = torch.zeros(mb_dim/2)
     data[{{mb_dim/2+1,-1}}]  = gen_network:forward(noise_data)
 
-    local output = network:forward(data)
-    local loss = bce_crit:forward(output,dis_target)
-    local grad = bce_crit:backward(output,dis_target)
+    output = network:forward(data)
+    loss = bce_crit:forward(output,target)
+    grad = bce_crit:backward(output,target)
     network:backward(data,grad)
     r = (output[{{1,mb_dim/2}}]:sum() + output[{{mb_dim/2+1,-1}}]:mul(-1):add(1):sum() )/mb_dim
     net_reward = net_reward + r
     return loss,dw
 end
-local train_gen = function()
-    --network:evaluate()
+local train_gen = function(x)
+    network:evaluate()
     local noise_data
     if use_gpu then
-        noise_data = get_noise(mb_dim):cuda()
+        noise_data = torch.randn(mb_dim,noise_dim):cuda()
     else
-        noise_data = get_noise(mb_dim)
+        noise_data = torch.randn(mb_dim,noise_dim)
+    end
+    if rev_grad then
+        target:zero()
+    else
+        target:zero():add(1)
     end
     local output = full_network:forward(noise_data)
-    local loss = bce_crit:forward(output,gen_target)
-    local grad = bce_crit:backward(output,gen_target)
+    local loss = bce_crit:forward(output,target)
+    local grad = bce_crit:backward(output,target)
     full_network:backward(noise_data,grad)
     return loss,dw
 end
---[[
---Public
---sets the function called in train_dis to
---generate data
---]]
-set_data_func = function(func)
-    data_func = func
-end
---[[
---Public
---single training step
---assumes get_data has been set to a minibatch generating function
---]]
-train = function(x)
+local train = function(x)
     if x ~= w then
         w:copy(x)
     end
@@ -193,19 +164,26 @@ train = function(x)
     return loss,dw
 end
 
-config = {
+config_dis = {
     learningRate  = 1e-5
     }
-standard_training = function()
+config_gen = {
+    learningRate  = 1e-5
+    }
 local num_steps = 1e6
 local refresh = 5e3
 local cumloss =0 
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 local plot3 = gnuplot.figure()
-set_data_func(get_data)
 for i=1,num_steps do
-    x,batchloss = optim.adam(train,w,config)
+    --[[
+    for k=1,1 do
+        x,batchloss = optim.adam(train_dis,w,config_dis)
+    end
+    x,batchloss = optim.adam(train_gen,w,config_gen)
+    --]]
+    x,batchloss = optim.adam(train,w,config_gen)
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
@@ -246,4 +224,4 @@ for i=1,num_steps do
         cumloss = 0
     end
 end
-end
+

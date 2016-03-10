@@ -4,104 +4,12 @@ require 'distributions'
 require 'gnuplot'
 require 'hdf5'
 torch.setnumthreads(1)
+local timer = torch.Timer()
 
 digit = torch.load('digit.t7')
-in_dim = digit[1]:size(2)
 
-hid_dim = 100
-out_dim = 1
-dropout_p = .1
---rev_grad = true
---Discrim
-local input = nn.Identity()()
-local hid_lin = nn.Linear(in_dim,hid_dim)
-local hid = nn.Dropout(dropout_p)(nn.ReLU()(hid_lin(input)))
-local out_lin = nn.Linear(hid_dim,out_dim)
-local output = nn.Sigmoid()(out_lin(hid))
-network = nn.gModule({input},{output})
---Gen
-noise_dim = 20
-gen_hid_dim = 100
-local input = nn.Identity()()
-local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
-local output =nn.Sigmoid()( nn.Linear(gen_hid_dim,in_dim)(hid))
-gen_network = nn.gModule({input},{output})
+require 'train_mnist.lua'
 
---full
-local full_input = nn.Identity()()
-local connect
-if rev_grad then
-    connect= nn.GradientReversal()(gen_network(full_input))
-else
-    connect= gen_network(full_input)
-end
-local full_out = network(connect)
-full_network = nn.gModule({full_input},{full_out})
-
-
-w,dw = full_network:getParameters()
-local timer = torch.Timer()
-local bce_crit = nn.BCECriterion()
-local net_reward = 0
-local mb_dim = 320
-local data = torch.zeros(mb_dim,in_dim)
-local target = torch.zeros(mb_dim,1)
-local mu = torch.randn(in_dim)
-local sigma = torch.rand(in_dim)
-gen_count = 0
-local train_dis = function(x)
-    if x ~= w then
-        w:copy(x)
-    end
-    full_network:zeroGradParameters()
-    network:training()
-    
-    for i=1,mb_dim/2 do
-        data[i] = D.digit[mb_ind[i]]
-    end
-    target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2)
-
-    noise_data = torch.randn(mb_dim/2,noise_dim)
-    target[{{mb_dim/2+1,-1}}] = torch.zeros(mb_dim/2)
-    data[{{mb_dim/2+1,-1}}]  = gen_network:forward(noise_data)
-
-    output = network:forward(data)
-    thresh = output[mb_dim/2+1][1] --sample threshold
-    --print(output[{{1,mb_dim/2}}]:mean(),output[{{mb_dim/2+1,-1}}]:mean())
-    gen_qual = (gen_qual*gen_count + output[{{mb_dim/2+1,-1}}]:mean())/(gen_count+1)
-    gen_count = gen_count + 1
-    thresh = gen_qual
-    thresh = .05
-    loss = bce_crit:forward(output,target)
-    grad = bce_crit:backward(output,target)
-    network:backward(data,grad)
-    return loss,dw
-end
-local train_gen = function(x)
-    if x ~= w then
-        w:copy(x)
-    end
-    full_network:zeroGradParameters()
-    network:evaluate()
-
-    local noise_data = torch.randn(mb_dim,noise_dim)
-    if rev_grad then
-        target:zero()
-    else
-        target:zero():add(1)
-    end
-    local output = full_network:forward(noise_data)
-    local loss = bce_crit:forward(output,target)
-    local grad = bce_crit:backward(output,target)
-    full_network:backward(noise_data,grad)
-    return loss,dw
-end
-config_dis = {
-    learningRate  = 1e-3
-    }
-config_gen = {
-    learningRate  = 1e-3
-    }
 local num_steps = 1e6
 local cumloss =0 
 
@@ -150,7 +58,15 @@ local plot1 = gnuplot.figure()
 gnuplot.axis{.5,num_state+.5,0,1}
 local plot2 = gnuplot.figure()
 local plot3 = gnuplot.figure()
+local plot4 = gnuplot.figure()
 gnuplot.axis{.5,num_state+.5,-.1,1.1}
+
+local get_data = function(data)
+    for i=1,mb_dim/2 do
+        data[i] = D.digit[mb_ind[i]]
+    end
+end
+set_data_func(get_data)
 for t=1,num_steps do
     r = 0
     --select action
@@ -182,14 +98,13 @@ for t=1,num_steps do
     D.sPrime[D.i] = sPrime
     D.digit[D.i] = digit[sPrime][torch.random(digit[sPrime]:size(1))] 
     D.i = (D.i % D.size) + 1
+
     --update model params
     if t > mb_dim then
+        --gotta re-perm if runnning train_dis multiple times
+        mb_ind = torch.randperm(math.min(t,D.size))
         --update adver nets
-        for k=1,5 do
-            mb_ind = torch.randperm(math.min(t,D.size))
-            x,batchloss = optim.rmsprop(train_dis,w,config_dis)
-        end
-        x,batchloss = optim.rmsprop(train_gen,w,config_gen)
+        x,batchloss = optim.adam(train,w,config)
         cumloss = cumloss + batchloss[1]
         --update Q
         for i = 1,mb_dim do
@@ -278,7 +193,8 @@ for t=1,num_steps do
         hist_total:zero()
         
         gnuplot.figure(plot4)
-        gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
+        --gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
+        gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
 
 
         print(thresh,t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
