@@ -1,6 +1,6 @@
 --use_gpu = true
 --rev_grad = true
---use_action = true
+use_action = true
 if use_gpu then
     require 'cunn'
 end

@@ -4,6 +4,8 @@ require 'distributions'
 require 'gnuplot'
 require 'hdf5'
 torch.setnumthreads(1)
+--afterstate = true
+
 local timer = torch.Timer()
 
 digit = torch.load('digit.t7')
@@ -17,11 +19,12 @@ local cumloss =0
 
 
 num_state = 10
-Q = torch.zeros(num_state,4)
-T = torch.ones(num_state,4)
+act_dim = 4
+Q = torch.zeros(num_state,act_dim)
+T = torch.ones(num_state,act_dim)
 correct = torch.ones(num_state)
 for i = 1,num_state-1 do
-    action = torch.random(4)
+    action = torch.random(act_dim)
     T[i][action] = i+1
     correct[i] = action
 end
@@ -37,14 +40,14 @@ gamma = .9
 net_reward = 0
 refresh = 1e3
 rmax = true
-C = torch.zeros(num_state,4)
+C = torch.zeros(num_state,act_dim)
 hist_C = torch.zeros(refresh,num_state)
 true_C = torch.zeros(num_state)
 thresh = .4
 thresh_dif = .4
-hist_thresh = torch.zeros(num_state,4)
-hist_known = torch.zeros(num_state,4)--,refresh*mb_dim*4)
-hist_total = torch.zeros(num_state,4)
+hist_thresh = torch.zeros(num_state,act_dim)
+hist_known = torch.zeros(num_state,act_dim)--,refresh*mb_dim*act_dim)
+hist_total = torch.zeros(num_state,act_dim)
 gen_qual = 0
 D = {}
 D.size = 1e4
@@ -52,7 +55,7 @@ D.s = torch.zeros(D.size)
 D.a = torch.zeros(D.size)
 D.r = torch.zeros(D.size)
 D.sPrime = torch.zeros(D.size)
-D.digit = torch.zeros(D.size,in_dim)--sPrime digit
+D.digit = torch.zeros(D.size,digit[1]:size(2))--sPrime digit
 D.i = 1
 local plot1 = gnuplot.figure()
 gnuplot.axis{.5,num_state+.5,0,1}
@@ -63,7 +66,13 @@ gnuplot.axis{.5,num_state+.5,-.1,1.1}
 
 local get_data = function(data)
     for i=1,mb_dim/2 do
-        data[i] = D.digit[mb_ind[i]]
+        if afterstate then
+            data[i] = D.digit[mb_ind[i]]
+        else
+            local action = torch.zeros(act_dim) 
+            action[D.a[mb_ind[i] ] ] = 1
+            data[i] = D.digit[mb_ind[i] ]:cat(action)
+        end
     end
 end
 set_data_func(get_data)
@@ -74,7 +83,7 @@ for t=1,num_steps do
         _,a = torch.max(Q[s],1)
         a = a[1]
     elseif torch.rand(1)[1] < epsilon then
-        a = torch.random(4)
+        a = torch.random(act_dim)
     else
         _,a = torch.max(Q[s],1)
         a = a[1]
@@ -111,16 +120,23 @@ for t=1,num_steps do
             local s,a,r,sPrime
             s = D.s[mb_ind[i]]
             if rmax then
-                for a = 1,4 do
-                    local digit_id = T[s][a]
-                    local sample_ind = torch.random(digit[digit_id]:size(1))
-                    local digit_sample = digit[digit_id][sample_ind]
-                    network:evaluate()
-                    C[s][a] = network:forward(digit_sample)[1] --cheating
+                for a = 1,act_dim do
+                    if afterstate then
+                        local digit_id = T[s][a]
+                        local sample_ind = torch.random(digit[digit_id]:size(1))
+                        local digit_sample = digit[digit_id][sample_ind]
+                        network:evaluate()
+                        C[s][a] = network:forward(digit_sample)[1] --cheating
+                    else
+                        local action = torch.zeros(act_dim) 
+                        action[D.a[mb_ind[i] ] ] = 1
+                        local possible = D.digit[mb_ind[i] ]:cat(action)
+                        C[s][a] = network:forward(possible)[1] --cheating
+                    end
                 end
                 hist_C[(t-1) % refresh +1] = C:mean(2)
                 --you can experience all actions under threshold, since they all go to heaven!
-                for j = 1,4 do
+                for j = 1,act_dim do
                     a = j
                     hist_total[s][a] = hist_total[s][a] + 1
                     --local visits = hist_total:sum(2)[s][1]
@@ -194,7 +210,12 @@ for t=1,num_steps do
         
         gnuplot.figure(plot4)
         --gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
-        gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
+        if afterstate then
+            gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
+        else
+            gnuplot.imagesc(data[{{mb_dim/2+1},{1,28*28}}]:reshape(28,28))
+            print(data[{{mb_dim/2+1},{28*28+1,-1}}])
+        end
 
 
         print(thresh,t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
