@@ -1,6 +1,6 @@
---use_gpu = true
+use_gpu = true
 --rev_grad = true
-use_action = true
+--use_action = true
 if use_gpu then
     require 'cunn'
 end
@@ -30,11 +30,11 @@ if use_gpu then
     notnot8 = notnot8:cuda()
     not8 = not8:cuda()
 end
-hid_dim = 1200
-noise_dim = 10
-gen_hid_dim = 1200
-dropout = 0
-mb_dim = 100
+hid_dim = 1000
+noise_dim = 20
+gen_hid_dim = 1000
+dropout = 0.5
+mb_dim = 320
 out_dim = 1
 if use_gpu then
     --Discrim
@@ -46,7 +46,7 @@ if use_gpu then
     network = nn.gModule({input},{output})
     --Gen
     local input = nn.Identity():cuda()()
-    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(nn.Linear(noise_dim,gen_hid_dim):cuda()(input))))
+    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(noise_dim,gen_hid_dim):cuda()(input)))
     local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,in_dim):cuda()(hid))
     gen_network = nn.gModule({input},{output})
 else
@@ -132,6 +132,7 @@ end
 
 local train_dis = function()
     --gen_network:evaluate()
+    network:training()
     data_func(data[{{1,mb_dim/2}}])
 
     local noise_data
@@ -152,7 +153,8 @@ local train_dis = function()
     return loss,dw
 end
 local train_gen = function()
-    --network:evaluate()
+    network:evaluate()
+    --network:training()
     local noise_data
     if use_gpu then
         noise_data = get_noise(mb_dim):cuda()
@@ -194,7 +196,7 @@ train = function(x)
 end
 
 config = {
-    learningRate  = 1e-5
+    learningRate  = 1e-3
     }
 standard_training = function()
 local num_steps = 1e6

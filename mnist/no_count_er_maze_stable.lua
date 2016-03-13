@@ -252,7 +252,7 @@ for t=1,num_steps do
         --gnuplot.bar(true_C)
         local bonus = hist_thresh:cdiv(hist_total+1)
         gnuplot.plot({bonus:mean(2)},{bonus:max(2):double()},{bonus:min(2):double()}) --dont divide by zero
-        --gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
+        gnuplot.imagesc(gen_network:forward(torch.randn(noise_dim)):reshape(28,28))
         hist_thresh:zero()
         --true_C:zero()
         

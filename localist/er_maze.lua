@@ -13,13 +13,14 @@ end
 
 
 
+visits = torch.zeros(num_state)
 s = 1
 epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 1e4
---rmax = true
+refresh = 1e2
+rmax = true
 C = torch.zeros(num_state,4)
 thresh = 10
 D = {}
@@ -54,6 +55,7 @@ for t=1,1e9 do
 
     --perform action
     sPrime = T[s][a]
+    visits[sPrime] = visits[sPrime] + 1
 
 
     C[s][a] = C[s][a] + 1
@@ -115,6 +117,8 @@ for t=1,1e9 do
         print(t,net_reward/refresh)
         --gnuplot.plot(C:sum(2))
         gnuplot.plot(Q:max(2):double())
+        print(visits)
+        visits:zero()
         if net_reward/refresh > ((1/num_state)*(1-epsilon)) then
             break
         end
