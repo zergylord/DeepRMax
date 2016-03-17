@@ -80,14 +80,12 @@ local plot4 = gnuplot.figure()
 gnuplot.axis{.5,num_state+.5,-.1,1.1}
 local plot5 = gnuplot.figure()
 
-local get_data = function(data)
+local get_data = function(data,action_data)
     for i=1,mb_dim/2 do
-        if afterstate then
-            data[i] = D.digit[mb_ind[i]]
-        else
-            local action = torch.rand(act_dim):mul(noise_mag) 
-            action[{{(D.a[mb_ind[i] ]-1)*act_units_used+1,D.a[mb_ind[i] ]*act_units_used}}] = 1 - torch.rand(1):mul(noise_mag)[1]
-            data[i] = D.digit[mb_ind[i] ]:cat(action)
+        data[i] = D.digit[mb_ind[i]]
+        if use_action then
+            action_data[i] = torch.rand(act_dim):mul(noise_mag) 
+            action_data[i][D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
         end
     end
 end
@@ -148,13 +146,15 @@ for t=1,num_steps do
                         C[s][a] = network:forward(digit_sample)[1] --cheating
                     else
                         network:evaluate()
-                        local action = torch.rand(act_dim):mul(noise_mag)
-                        action[{{(D.a[mb_ind[i] ]-1)*act_units_used+1,D.a[mb_ind[i] ]*act_units_used}}] = 1-torch.rand(1):mul(noise_mag)[1]
-                        local possible = D.digit[mb_ind[i] ]:cat(action)
+                        local action = torch.rand(1,act_dim):mul(noise_mag)
+                        action[1][a] = 1-torch.rand(1):mul(noise_mag)[1]
+                        local possible
                         if use_gpu then
-                            possible = possible:cuda()
+                            possible = {D.digit[mb_ind[i] ]:reshape(1,in_dim):cuda(),action:cuda()}
+                        else
+                            possible = {D.digit[mb_ind[i] ],action}
                         end
-                        C[s][a] = network:forward(possible)[1]
+                        C[s][a] = network:forward(possible)[1][1]
                     end
                 end
                 --you can experience all actions under threshold, since they all go to heaven!
@@ -244,6 +244,7 @@ for t=1,num_steps do
         hist_total:zero()
         hist_thresh:zero()
         
+        C:zero()
         --vizualize generator
         gnuplot.figure(plot4)
         if afterstate then
@@ -251,8 +252,8 @@ for t=1,num_steps do
         else
             gnuplot.imagesc(data[{{mb_dim/2+1},{1,28*28}}]:reshape(28,28))
             gnuplot.figure(plot5)
-            gnuplot.imagesc(data[{{},{28*28+1,-1}}])
-            print(data[{{mb_dim/2+1},{28*28+1,-1}}])
+            gnuplot.imagesc(action_data)
+            print(action_data[{{mb_dim/2+1}}])
         end
 
 
