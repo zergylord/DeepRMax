@@ -1,6 +1,7 @@
 use_gpu = true
 --rev_grad = true
 --use_action = true
+--act_dim = 4
 if use_gpu then
     require 'cunn'
 end
@@ -19,7 +20,6 @@ not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
 notnot8 = mnist_data.x_train[mask:eq(0)]
 notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
 if use_action then
-    act_dim = 4
     in_dim = in_dim + act_dim
     act_dict = torch.eye(act_dim):float()
     if use_gpu then
