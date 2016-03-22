@@ -1,4 +1,4 @@
---use_gpu = true
+use_gpu = true
 --rev_grad = true
 --use_action = true
 --act_dim = 4

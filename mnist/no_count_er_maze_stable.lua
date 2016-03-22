@@ -86,7 +86,7 @@ local get_data = function(data)
             data[i] = D.digit[mb_ind[i]]
         else
             local action = torch.rand(act_dim):mul(noise_mag) 
-            action[D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
+            --action[D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
             data[i] = D.digit[mb_ind[i] ]:cat(action)
         end
     end
@@ -149,7 +149,7 @@ for t=1,num_steps do
                     else
                         network:evaluate()
                         local action = torch.rand(act_dim):mul(noise_mag)
-                        action[a] = 1-torch.rand(1):mul(noise_mag)[1]
+                        --action[a] = 1-torch.rand(1):mul(noise_mag)[1]
                         local possible = D.digit[mb_ind[i] ]:cat(action)
                         if use_gpu then
                             possible = possible:cuda()
@@ -236,7 +236,6 @@ for t=1,num_steps do
         --gnuplot.imagesc(min_known_over_time[{{1,t/refresh}}])
         print(visits)
         visits_over_time[t/refresh] = visits
-        --gnuplot.imagesc(visits_over_time[{{1,t/refresh}}])
 
         visits:zero()
        -- hist_known:zero()
@@ -246,6 +245,7 @@ for t=1,num_steps do
         
         C:zero()
         --vizualize generator
+        --jk, visits over time
         gnuplot.figure(plot4)
         if afterstate then
             gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
@@ -255,6 +255,7 @@ for t=1,num_steps do
             gnuplot.imagesc(data[{{},{28*28+1,-1}}])
             print(data[{{mb_dim/2+1},{28*28+1,-1}}])
         end
+        gnuplot.imagesc(visits_over_time[{{1,t/refresh}}])
 
 
         print(thresh,t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)

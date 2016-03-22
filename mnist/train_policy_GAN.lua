@@ -1,7 +1,5 @@
---use_gpu = true
---rev_grad = true
---use_action = true
---act_dim = 4
+use_gpu = true
+act_dim = 4
 if use_gpu then
     require 'cunn'
 end
@@ -19,35 +17,32 @@ in_dim = mnist_data.x_train:size(2)
 not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
 notnot8 = mnist_data.x_train[mask:eq(0)]
 notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
-if use_action then
-    in_dim = in_dim + act_dim
-    act_dict = torch.eye(act_dim):float()
-    if use_gpu then
-        act_dict = act_dict:cuda()
-    end
-end
+act_dict = torch.eye(act_dim):float()
 if use_gpu then
+    act_dict = act_dict:cuda()
     notnot8 = notnot8:cuda()
     not8 = not8:cuda()
 end
 hid_dim = 1000
-noise_dim = 20
 gen_hid_dim = 1000
 dropout = 0.5
 mb_dim = 320
 out_dim = 1
+fact_dim = 10
 if use_gpu then
     --Discrim
     local input = nn.Identity():cuda()()
-    local hid_lin = nn.Linear(in_dim,hid_dim):cuda()
-    local hid = nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(hid_lin(input)))
-    local out_lin = nn.Linear(hid_dim,out_dim):cuda()
-    local output = (nn.Sigmoid():cuda()(out_lin(hid)))
-    network = nn.gModule({input},{output})
+    local action = nn.Identity():cuda()()
+    hid_lin = nn.Linear(in_dim,hid_dim):cuda()
+    hid = nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(hid_lin(input)))
+    local factor = nn.Dropout(dropout):cuda()(nn.CMulTable():cuda(){nn.Linear(hid_dim,fact_dim):cuda()(hid),nn.Linear(act_dim,fact_dim):cuda()(action)})
+    local out_lin = nn.Linear(fact_dim,out_dim):cuda()
+    local output = (nn.Sigmoid():cuda()(out_lin(factor)))
+    network = nn.gModule({input,action},{output})
     --Gen
     local input = nn.Identity():cuda()()
-    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(noise_dim,gen_hid_dim):cuda()(input)))
-    local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,in_dim):cuda()(hid))
+    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input)))
+    local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(hid))
     gen_network = nn.gModule({input},{output})
 else
     --Discrim
@@ -65,12 +60,8 @@ else
 end
 --full
 local full_input = nn.Identity()()
-if rev_grad then
-    connect= nn.GradientReversal():cuda()(gen_network(full_input))
-else
-    connect= gen_network(full_input)
-end
-local full_out = network(connect)
+connect= gen_network(full_input)
+local full_out = network{full_input,connect}
 full_network = nn.gModule({full_input},{full_out})
 
 
@@ -85,6 +76,7 @@ end
 local net_reward = 0
 if use_gpu then
     data = torch.zeros(mb_dim,in_dim):cuda()
+    action_data = torch.zeros(mb_dim,act_dim):cuda()
     dis_target = torch.zeros(mb_dim,1):cuda()
     dis_target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2):cuda()
     if rev_grad then
@@ -104,50 +96,35 @@ else
 end
 
 
-local get_noise = function(dim)
-    --one-hot noise
-    local noise = torch.zeros(dim,noise_dim)
-    for i=1,dim do
-        noise[i][torch.random(noise_dim)] = 1
-    end
-    --just gaussian
-    return torch.randn(dim,noise_dim)
-end
 --[[ takes a view of the memory 
     and fills it with data
 --]]
-local get_data = function(data)
+local get_data = function(data,action_data)
     local samples = torch.randperm(not8:size(1))
     --local data = torch.zeros(num,dim)
     num = data:size(1)
     dim = data:size(2)
     for i=1,num do
-        if use_action then
-            data[i] = not8[samples[i] ]:cat(act_dict[torch.random(act_dim)])
-        else
-            data[i] = not8[samples[i] ]
-        end
+        data[i] = not8[samples[i] ]
+        --action_data[i] = act_dict[torch.random(act_dim)]
+        action_data[i] = torch.rand(act_dim):mul(noise_mag)
+        action_data[i][torch.random(act_dim)] = 1 - torch.rand(1):mul(noise_mag)[1]
     end
 end
-
+last_compare = torch.zeros(mb_dim)
 local train_dis = function()
     --gen_network:evaluate()
     network:training()
-    data_func(data[{{1,mb_dim/2}}])
+    data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
 
-    local noise_data
-    if use_gpu then
-        noise_data = get_noise(mb_dim/2):cuda()
-    else
-        noise_data = get_noise(mb_dim/2)
-    end
+    local output
+    action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward(data[{{mb_dim/2+1,-1}}])
+    output = network:forward{data,action_data}
+    last_compare:copy(output)
 
-    data[{{mb_dim/2+1,-1}}]  = gen_network:forward(noise_data)
-
-    local output = network:forward(data)
     local loss = bce_crit:forward(output,dis_target)
     local grad = bce_crit:backward(output,dis_target)
-    network:backward(data,grad)
+    network:backward({data,action_data},grad)
     r = (output[{{1,mb_dim/2}}]:sum() + output[{{mb_dim/2+1,-1}}]:mul(-1):add(1):sum() )/mb_dim
     net_reward = net_reward + r
     return loss,dw
@@ -156,12 +133,8 @@ local train_gen = function()
     network:evaluate()
     --network:training()
     local noise_data
-    if use_gpu then
-        noise_data = get_noise(mb_dim):cuda()
-    else
-        noise_data = get_noise(mb_dim)
-    end
-    local output = full_network:forward(noise_data)
+    data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
+    local output = full_network:forward(data)
     local loss = bce_crit:forward(output,gen_target)
     local grad = bce_crit:backward(output,gen_target)
     full_network:backward(noise_data,grad)
@@ -199,8 +172,9 @@ config = {
     learningRate  = 1e-3
     }
 standard_training = function()
+ noise_mag = .15
 local num_steps = 1e6
-local refresh = 5e3
+local refresh = 1e2
 local cumloss =0 
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
@@ -211,39 +185,32 @@ for i=1,num_steps do
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
-        output = network:forward(data)
+        output = network:forward{data,action_data}
         timer:reset()
         gnuplot.figure(plot1)
-        if use_action then
-            gnuplot.imagesc(data[{{mb_dim/2+1},{1,in_dim-act_dim}}]:reshape(28,28))
-        else
-            gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
-        end
+        gnuplot.imagesc(action_data)
         
         
         gnuplot.figure(plot2)
         samples1 = torch.randperm(not8:size(1))
         samples2 = torch.randperm(notnot8:size(1))
         gnuplot.bar(network.output)
-        gnuplot.axis{0,100,0,1}
+        gnuplot.axis{0,mb_dim,0,1}
 
 
         gnuplot.figure(plot3)
-        if use_action then
-            --show all actions (bottom half generated)
-            gnuplot.imagesc(data[{{},{in_dim-act_dim+1,-1}}])
-            --test unused actions
-        else
-            for i=1,mb_dim do
-                if i<=mb_dim/2 then
-                    data[i] = not8[samples1[i]]
-                else
-                    data[i] = notnot8[samples2[i]]
-                end 
-            end
-            output = network:forward(data)
-            print(output[{{1,mb_dim/2}}]:mean(),output[{{mb_dim/2+1,-1}}]:mean())
+        data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
+        for i=1,mb_dim do
+            if i<=mb_dim/2 then
+                data[i] = not8[samples1[i]]
+            else
+                data[i] = notnot8[samples2[i]]
+            end 
         end
+        output = network:forward{data,action_data}
+        gnuplot.bar(network.output)
+        gnuplot.axis{0,mb_dim,0,1}
+        print(output[{{1,mb_dim/2}}]:mean(),output[{{mb_dim/2+1,-1}}]:mean())
         net_reward = 0
         cumloss = 0
     end

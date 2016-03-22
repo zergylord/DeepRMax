@@ -5,7 +5,7 @@ require 'gnuplot'
 require 'hdf5'
 torch.setnumthreads(1)
 --afterstate = true
-noise_mag = 0 --.25
+noise_mag = 0 --.05
 if not afterstate then
     use_action = true
 end
@@ -17,7 +17,8 @@ local timer = torch.Timer()
 
 digit = torch.load('digit.t7')
 
-require 'train_mnist.lua'
+--require 'train_mnist.lua'
+require 'train_policy_GAN.lua'
 
 local num_steps = 1e5
 local cumloss =0 
@@ -47,7 +48,8 @@ net_reward = 0
 refresh = 1e2
 rmax = true
 C = torch.zeros(num_state,act_dim)
-thresh = .2 --.04
+inv_confuse = torch.zeros(num_state,act_dim)
+thresh = .92 --.2 --.04
 hist_thresh = torch.zeros(num_state,act_dim)
 hist_total = torch.zeros(num_state,act_dim)
 visits = torch.zeros(num_state)
@@ -81,7 +83,8 @@ gnuplot.axis{.5,num_state+.5,-.1,1.1}
 local plot5 = gnuplot.figure()
 
 local get_data = function(data,action_data)
-    for i=1,mb_dim/2 do
+    num = data:size(1)
+    for i=1,num do
         data[i] = D.digit[mb_ind[i]]
         if use_action then
             action_data[i] = torch.rand(act_dim):mul(noise_mag) 
@@ -155,6 +158,7 @@ for t=1,num_steps do
                             possible = {D.digit[mb_ind[i] ],action}
                         end
                         C[s][a] = network:forward(possible)[1][1]
+                        inv_confuse[s][a] = confusion_crit:forward(torch.Tensor{C[s][a]},torch.Tensor{.5})
                     end
                 end
                 --you can experience all actions under threshold, since they all go to heaven!
@@ -167,7 +171,7 @@ for t=1,num_steps do
                         min_known[(s-1)*act_dim+a] = C[s][a]
                     end
                     hist_total[s][a] = hist_total[s][a] + 1
-                    if C[s][a] < thresh then
+                    if inv_confuse[s][a] >= thresh then
                         hist_thresh[s][a] = hist_thresh[s][a] + 1
                         sPrime = s
                         r = 1
@@ -176,7 +180,7 @@ for t=1,num_steps do
                 end
                 --only experienced actions can be updated over threshold
                 a = D.a[mb_ind[i]]
-                if C[s][a] >= thresh then
+                if inv_confuse[s][a] < thresh then
                     --print('known!')
                     r = D.r[mb_ind[i]]
                     sPrime = D.sPrime[mb_ind[i]]
@@ -231,12 +235,11 @@ for t=1,num_steps do
             known_list[i] = {}
         end
         --gnuplot.imagesc(known_var_over_time[{{1,t/refresh}}])
-        gnuplot.imagesc(confusion_over_time[{{1,t/refresh}}])
+        gnuplot.imagesc(confusion_over_time[{{1,t/refresh}}]:t())
         --gnuplot.imagesc(known_over_time[{{1,t/refresh}}])
         --gnuplot.imagesc(min_known_over_time[{{1,t/refresh}}])
         print(visits)
         visits_over_time[t/refresh] = visits
-        --gnuplot.imagesc(visits_over_time[{{1,t/refresh}}])
 
         visits:zero()
        -- hist_known:zero()
@@ -250,10 +253,16 @@ for t=1,num_steps do
         if afterstate then
             gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
         else
-            gnuplot.imagesc(data[{{mb_dim/2+1},{1,28*28}}]:reshape(28,28))
+            --gnuplot.imagesc(data[{{mb_dim/2+1},{1,28*28}}]:reshape(28,28))
+            
+            if last_compare then
+            gnuplot.bar(last_compare)
+            gnuplot.axis{0,mb_dim,0,1}
+            end
             gnuplot.figure(plot5)
             gnuplot.imagesc(action_data)
             print(action_data[{{mb_dim/2+1}}])
+            --gnuplot.imagesc(visits_over_time[{{1,t/refresh}}]:t())
         end
 
 
