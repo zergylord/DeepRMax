@@ -17,7 +17,7 @@ local timer = torch.Timer()
 
 digit = torch.load('digit.t7')
 
---require 'train_mnist.lua'
+--require 'train_sa_GAN.lua'
 require 'train_policy_GAN.lua'
 
 local num_steps = 1e5

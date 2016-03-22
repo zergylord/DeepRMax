@@ -36,11 +36,7 @@ local data = torch.zeros(mb_dim,in_dim)
 local target = torch.zeros(mb_dim,1)
 local mu = torch.randn(in_dim)
 local sigma = torch.rand(in_dim)
-local train_dis = function(x)
-    if x ~= w then
-        w:copy(x)
-    end
-    full_network:zeroGradParameters()
+local train_dis = function()
     network:training()
 
     data[{{1,mb_dim/2}}] = distributions.mvn.rnd(torch.zeros(mb_dim/2,in_dim),mu,sigma) --torch.randn(mb_dim/2,in_dim)*5-1
@@ -58,11 +54,7 @@ local train_dis = function(x)
     net_reward = net_reward + r
     return loss,dw
 end
-local train_gen = function(x)
-    if x ~= w then
-        w:copy(x)
-    end
-    full_network:zeroGradParameters()
+local train_gen = function()
     network:evaluate()
 
     local noise_data = torch.randn(mb_dim,noise_dim)
@@ -71,6 +63,20 @@ local train_gen = function(x)
     local loss = bce_crit:forward(output,target)
     local grad = bce_crit:backward(output,target)
     full_network:backward(data,grad)
+    return loss,dw
+end
+train = function(x)
+    if x ~= w then
+        w:copy(x)
+    end
+    full_network:zeroGradParameters()
+    local loss = 0
+    loss = loss + train_gen()
+    network:zeroGradParameters()
+    --sees 3x fake examples, if not zerod
+    for i = 1,1 do
+        loss = loss + train_dis()
+    end
     return loss,dw
 end
 config = {
@@ -82,10 +88,7 @@ local cumloss =0
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
 for i=1,num_steps do
-    for k=1,1 do
-        x,batchloss = optim.rmsprop(train_dis,w,config)
-    end
-    x,batchloss = optim.rmsprop(train_gen,w,config)
+    x,batchloss = optim.rmsprop(train,w,config)
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
@@ -99,7 +102,7 @@ for i=1,num_steps do
         output = network:forward(data)
         gnuplot.figure(plot1)
         local values = distributions.mvn.pdf(data2,mu,sigma)
-        gnuplot.scatter3({data[{{},1}],data[{{},2}],output[{{},1}]},{data2[{{},1}],data2[{{},2}],values[{{},1}]})
+        gnuplot.scatter3({data[{{},1}],data[{{},2}],output[{{},1}]},{data2[{{},1}],data2[{{},2}],values[{{},1}]},{torch.Tensor{0,0},torch.Tensor{0,0},torch.Tensor{0,1}})
         
         net_reward = 0
         cumloss = 0
