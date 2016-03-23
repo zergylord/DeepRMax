@@ -74,13 +74,6 @@ D.r = torch.zeros(D.size)
 D.sPrime = torch.zeros(D.size)
 D.digit = torch.zeros(D.size,digit[1]:size(2))--sPrime digit
 D.i = 1
-local plot1 = gnuplot.figure()
-gnuplot.axis{.5,num_state+.5,0,1}
-local plot2 = gnuplot.figure()
-local plot3 = gnuplot.figure()
-local plot4 = gnuplot.figure()
-gnuplot.axis{.5,num_state+.5,-.1,1.1}
-local plot5 = gnuplot.figure()
 
 local get_data = function(data,action_data)
     num = data:size(1)
@@ -205,28 +198,29 @@ for t=1,num_steps do
     s = sPrime
 
     if t % refresh == 0 then
-        --Q-values
-        gnuplot.figure(plot1)
+        gnuplot.figure(1)
+        gnuplot.raw("set multiplot layout 2,3")
+
+
+        gnuplot.raw("set title 'Q-values' ")
+        gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
+        gnuplot.raw('set yrange [0:1] noreverse')
         gnuplot.plot({Q:mean(2)},{Q:max(2):double()},{Q:min(2):double()})
 
 
-
-        --percent of time a state-action gets R-Max bonus
-        gnuplot.figure(plot2)
+        
+        gnuplot.raw("set title 'percent of time a state-action gets R-Max bonus' ")
+        gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
+        gnuplot.raw('set yrange [0:1] noreverse')
         local bonus = hist_thresh:cdiv(hist_total+1)
         gnuplot.plot({bonus:mean(2)},{bonus:max(2):double()},{bonus:min(2):double()}) --dont divide by zero
         
         
         
-        --known-ness levels per state
-        gnuplot.figure(plot3)
-        confusion_over_time[t/refresh] = confusion
+        gnuplot.raw("set title 'bonus % over time' ")
+        confusion_over_time[t/refresh] = bonus --confusion
         known_over_time[t/refresh] = bonus:reshape(act_dim*num_state) --known
         min_known_over_time[t/refresh] = min_known
-        --[[
-        local known = hist_known:cdiv(hist_total+1)
-        gnuplot.plot({known:mean(2)},{known:max(2):double()},{known:min(2):double()})
-        --]]
         for i=1,act_dim*num_state do
             local temp = torch.Tensor(known_list[i])
             if temp:dim() > 0 then
@@ -234,37 +228,27 @@ for t=1,num_steps do
             end
             known_list[i] = {}
         end
-        --gnuplot.imagesc(known_var_over_time[{{1,t/refresh}}])
-        gnuplot.imagesc(confusion_over_time[{{1,t/refresh}}]:t())
-        --gnuplot.imagesc(known_over_time[{{1,t/refresh}}])
-        --gnuplot.imagesc(min_known_over_time[{{1,t/refresh}}])
+        gnuplot.imagesc(confusion_over_time[{{1,t/refresh}}])
         print(visits)
         visits_over_time[t/refresh] = visits
 
-        visits:zero()
-       -- hist_known:zero()
-        known:zero()
-        hist_total:zero()
-        hist_thresh:zero()
         
-        C:zero()
-        --vizualize generator
-        gnuplot.figure(plot4)
-        if afterstate then
-            gnuplot.imagesc(data[{{mb_dim/2+1}}]:reshape(28,28))
-        else
-            --gnuplot.imagesc(data[{{mb_dim/2+1},{1,28*28}}]:reshape(28,28))
-            
-            if last_compare then
-            gnuplot.bar(last_compare)
-            gnuplot.axis{0,mb_dim,0,1}
-            end
-            gnuplot.figure(plot5)
-            gnuplot.imagesc(action_data)
-            print(action_data[{{mb_dim/2+1}}])
-            --gnuplot.imagesc(visits_over_time[{{1,t/refresh}}]:t())
+        if last_compare then
+        gnuplot.raw("set title 'descriminator judgements' ")
+        gnuplot.raw('set xrange [' .. .5 .. ':' .. mb_dim+.5 .. '] noreverse')
+        gnuplot.raw('set yrange [0:1] noreverse')
+        gnuplot.bar(last_compare)
+        --gnuplot.axis{0,mb_dim,0,1}
         end
 
+        gnuplot.raw("set title 'action generation' ")
+        gnuplot.imagesc(action_data)
+        print(action_data[{{mb_dim/2+1}}])
+
+        gnuplot.raw("set title 'visits over time' ")
+        gnuplot.imagesc(visits_over_time[{{1,t/refresh}}])
+
+        gnuplot.raw('unset multiplot')
 
         print(thresh,t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         gen_count = 0
@@ -275,6 +259,10 @@ for t=1,num_steps do
             break
         end
         net_reward = 0
+        visits:zero()
+        known:zero()
+        hist_total:zero()
+        hist_thresh:zero()
         collectgarbage()
     end
 
