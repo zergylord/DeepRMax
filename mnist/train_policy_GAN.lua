@@ -111,7 +111,6 @@ local get_data = function(data,action_data)
         action_data[i][torch.random(act_dim)] = 1 - torch.rand(1):mul(noise_mag)[1]
     end
 end
-last_compare = torch.zeros(mb_dim)
 local train_dis = function()
     --gen_network:evaluate()
     network:training()
@@ -120,7 +119,7 @@ local train_dis = function()
     local output
     action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward(data[{{mb_dim/2+1,-1}}])
     output = network:forward{data,action_data}
-    last_compare:copy(output)
+    last_compare = output
 
     local loss = bce_crit:forward(output,dis_target)
     local grad = bce_crit:backward(output,dis_target)
