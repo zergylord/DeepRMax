@@ -42,6 +42,7 @@ if use_gpu then
     --Gen
     local input = nn.Identity():cuda()()
     local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input)))
+    --local output =nn.SoftMax():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(hid))
     local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(hid))
     gen_network = nn.gModule({input},{output})
 else

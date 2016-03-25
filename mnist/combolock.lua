@@ -20,6 +20,7 @@ digit = torch.load('digit.t7')
 
 --require 'train_sa_GAN.lua'
 require 'train_policy_GAN.lua'
+softmax = nn.SoftMax():cuda()
 
 local num_steps = 1e5
 local cumloss =0 
@@ -60,6 +61,7 @@ neg_entropy_over_time_per_state = torch.zeros(num_steps/refresh,num_state)
 neg_entropy_over_time_per_state_norm = torch.zeros(num_steps/refresh,num_state)
 neg_entropy_over_time_correct = torch.zeros(num_steps/refresh,num_state)
 neg_entropy_over_time_incorrect = torch.zeros(num_steps/refresh,num_state)
+sa_visits = torch.zeros(num_state,act_dim)
 D = {}
 D.size = 1e4
 D.s = torch.zeros(D.size)
@@ -68,7 +70,6 @@ D.r = torch.zeros(D.size)
 D.sPrime = torch.zeros(D.size)
 D.digit = torch.zeros(D.size,digit[1]:size(2))--sPrime digit
 D.i = 1
-
 local get_data = function(data,action_data)
     num = data:size(1)
     for i=1,num do
@@ -76,6 +77,11 @@ local get_data = function(data,action_data)
         if use_action then
             action_data[i] = torch.rand(act_dim):mul(noise_mag) 
             action_data[i][D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
+            --[[
+            action_data[i] = torch.zeros(act_dim)
+            action_data[i][D.a[mb_ind[i] ] ] = 1
+            action_data[i] = softmax:forward(action_data[i])
+            --]]
         end
     end
 end
@@ -89,6 +95,7 @@ for t=1,num_steps do
 
     --perform action
     sPrime = T[s][a]
+    sa_visits[s][a] = sa_visits[s][a] + 1
     visits[sPrime] = visits[sPrime] + 1
 
     if sPrime == num_state then
@@ -108,21 +115,34 @@ for t=1,num_steps do
         --gotta re-perm if runnning train_dis multiple times
         mb_ind = torch.randperm(math.min(t,D.size))
         --update adver nets
-        x,batchloss = optim.adam(train,w,config)
+        _,batchloss = optim.adam(train,w,config)
         cumloss = cumloss + batchloss[1]
         --update Q
+        local x,y,target 
+        if use_qnet then
+            x = torch.zeros(mb_dim*act_dim,in_dim)
+            y = torch.zeros(mb_dim*act_dim,act_dim)
+            target = torch.zeros(mb_dim*act_dim,act_dim)
+        end
+
         for i = 1,mb_dim do
             local s,a,r,sPrime
             s = D.s[mb_ind[i]]
+            state = D.digit[mb_ind[i] ]
             for a = 1,act_dim do
                 network:evaluate()
                 local action = torch.rand(1,act_dim):mul(noise_mag)
                 action[1][a] = 1-torch.rand(1):mul(noise_mag)[1]
+                --[[
+                local action = torch.zeros(1,act_dim)
+                action[1][a] = 1
+                action = softmax:forward(action:cuda())
+                --]]
                 local possible
                 if use_gpu then
-                    possible = {D.digit[mb_ind[i] ]:reshape(1,in_dim):cuda(),action:cuda()}
+                    possible = {state:reshape(1,in_dim):cuda(),action:cuda()}
                 else
-                    possible = {D.digit[mb_ind[i] ],action}
+                    possible = {state,action}
                 end
                 C[s][a] = network:forward(possible)[1][1]
             end
@@ -216,17 +236,44 @@ for t=1,num_steps do
         --gnuplot.axis{0,mb_dim,0,1}
         end
         --]]
-
+        --[[
         gnuplot.raw("set title 'action generation' ")
         sorted,_ = action_data:sort()
         gnuplot.imagesc(sorted)
-        print(D.a[D.a:ne(0)]:histc(act_dim))
+        print(D.a[D.a:ne(0)]:histc(act_dim):div(D.a:ne(0):sum()))
         if last_compare then
-            print(gen_network.output:sum(1))
+            print(gen_network.output:sum(1):div(gen_network.output:sum())[1])
+            print(gen_network.output[1])
         end
-
         gnuplot.raw("set title 'visits over time' ")
         gnuplot.imagesc(visits_over_time[{{1,t/refresh}}])
+        --]]
+
+        cur_known = torch.zeros(num_state,act_dim)
+        network:evaluate() 
+        local iter = 10
+        for s = 1,num_state do
+            local state = torch.zeros(iter,digit[s]:size(2))
+            for i=1,iter do
+                state[i] = digit[s][torch.random(digit[s]:size(1))] 
+            end
+            for a=1,act_dim do
+                local action = torch.rand(iter,act_dim):mul(noise_mag)
+                action[{{},a}] = -torch.rand(iter):mul(noise_mag)+1
+                local out = network:forward{state:cuda(),action:cuda()}:double()
+                for i=1,iter do
+                    cur_known[s][a] = cur_known[s][a] + ((1- H(out[i]))^(1/temp)) /iter
+                end
+            end
+        end
+        network:training()
+
+        gnuplot.raw("set title 'current D estimates' ")
+        gnuplot.imagesc(cur_known)
+        gnuplot.raw("set title 'total visits' ")
+        gnuplot.imagesc(sa_visits:log1p())
+        
+
 
         gnuplot.raw('unset multiplot')
 
