@@ -50,7 +50,7 @@ gamma = .9
 net_reward = 0
 refresh = 1e2
 bonus_hist = torch.zeros(num_steps/refresh)
-C = torch.zeros(mb_dim)
+C = torch.zeros(num_state,act_dim)
 neg_entropy = torch.zeros(num_state,act_dim)
 hist_total = torch.zeros(num_state,act_dim)
 visits = torch.zeros(num_state)
@@ -114,14 +114,6 @@ for t=1,num_steps do
     if t > mb_dim then
         --gotta re-perm if runnning train_dis multiple times
         mb_ind = torch.randperm(math.min(t,D.size))
-        local mask = torch.zeros(D.size,1):byte()
-        local action = torch.rand(mb_dim*act_dim,act_dim):mul(noise_mag)
-        for i =1,mb_dim do
-            mask[mb_ind[i] ] = 1
-            for a = 1,act_dim  do
-                action[mb_dim*(a-1)+i][a] = 1-torch.rand(1):mul(noise_mag)[1]
-            end
-        end
         --update adver nets
         _,batchloss = optim.adam(train,w,config)
         cumloss = cumloss + batchloss[1]
@@ -129,57 +121,57 @@ for t=1,num_steps do
         local x,y,target 
         if use_qnet then
             x = torch.zeros(mb_dim*act_dim,in_dim)
-            y = q_network:forward()
+            y = torch.zeros(mb_dim*act_dim,act_dim)
             target = torch.zeros(mb_dim*act_dim,act_dim)
         end
-        local s,a,r,sPrime,a_actual
-        s = D.s[mask:squeeze()]
-        sPrime = D.sPrime[mask:squeeze()]
-        r = D.r[mask:squeeze()]
-        a_actual = D.a[mask:squeeze()]
-        state = D.digit[mask:expandAs(D.digit)]:reshape(mb_dim,in_dim)
-        state = state:repeatTensor(act_dim,1)
 
-        network:evaluate()
-        local possible
-        if use_gpu then
-            possible = {state:cuda(),action:cuda()}
-        else
-            possible = {state,action}
-        end
-        C = network:forward(possible):squeeze()
-        --TODO:vectorize this part too
-        target = torch.zeros(mb_dim*act_dim)
-        target_mask = torch.zeros(mb_dim*act_dim):byte()
-        for i=1,mb_dim do
+        for i = 1,mb_dim do
+            local s,a,r,sPrime
+            s = D.s[mb_ind[i]]
+            state = D.digit[mb_ind[i] ]
+            for a = 1,act_dim do
+                network:evaluate()
+                local action = torch.rand(1,act_dim):mul(noise_mag)
+                action[1][a] = 1-torch.rand(1):mul(noise_mag)[1]
+                --[[
+                local action = torch.zeros(1,act_dim)
+                action[1][a] = 1
+                action = softmax:forward(action:cuda())
+                --]]
+                local possible
+                if use_gpu then
+                    possible = {state:reshape(1,in_dim):cuda(),action:cuda()}
+                else
+                    possible = {state,action}
+                end
+                C[s][a] = network:forward(possible)[1][1]
+            end
             --you can experience all actions under threshold, since they all go to heaven!
             local known_flag = true
             for j = 1,act_dim do
                 a = j
-                hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
-                local chance_unknown = (1 - H(C[mb_dim*(a-1)+i]))^(1/temp)
-                neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
+                hist_total[s][a] = hist_total[s][a] + 1
+                local chance_unknown = (1 - H(C[s][a]))^(1/temp)
+                neg_entropy[s][a] = neg_entropy[s][a] + chance_unknown
                 if  chance_unknown > torch.rand(1)[1] then
                     if a == D.a[mb_ind[i] ] then
                         known_flag = false
                     end
-                    local r = 1
-                    if use_qnet then
-                        target = r - y
-                    else
-                        Q[s[i]][a] = (1-alpha)*Q[s[i]][a] + (alpha)*r
-                    end
-                    target[mb_dim*(a-1)+i] = r
-                    target_mask[mb_dim*(a-1)+i] = 1
+                    sPrime = s
+                    r = 1
+                    Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*r
                 end
             end
             --only experienced actions can be updated over threshold
+            a = D.a[mb_ind[i]]
             if known_flag then
                 --print('known!')
-                if s[i] == num_state then
-                    Q[s[i]][a_actual[i]] = (1-alpha)*Q[s[i]][a_actual[i]] + (alpha)*r[i]
+                r = D.r[mb_ind[i]]
+                sPrime = D.sPrime[mb_ind[i]]
+                if s == num_state then
+                    Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*r
                 else
-                    Q[s[i]][a_actual[i]] = (1-alpha)*Q[s[i]][a_actual[i]] + (alpha)*(r[i]+gamma*torch.max(Q[sPrime[i]]))
+                    Q[s][a] = (1-alpha)*Q[s][a] + (alpha)*(r+gamma*torch.max(Q[sPrime]))
                 end
             end
         end
