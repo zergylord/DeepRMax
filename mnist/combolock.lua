@@ -3,6 +3,9 @@ require 'optim'
 require 'distributions'
 require 'gnuplot'
 require 'hdf5'
+require 'cunn'
+--torch.manualSeed(123)
+--cutorch.manualSeed(123)
 torch.setnumthreads(1)
 log2 = function(x) return torch.log(x)/torch.log(2) end
 --H = function(p) return log2(p):cmul(-p)-log2(-p+1):cmul(-p+1) end
@@ -77,11 +80,6 @@ local get_data = function(data,action_data)
         if use_action then
             action_data[i] = torch.rand(act_dim):mul(noise_mag) 
             action_data[i][D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
-            --[[
-            action_data[i] = torch.zeros(act_dim)
-            action_data[i][D.a[mb_ind[i] ] ] = 1
-            action_data[i] = softmax:forward(action_data[i])
-            --]]
         end
     end
 end
@@ -134,6 +132,7 @@ for t=1,num_steps do
         end
         local s,a,r,sPrime,a_actual
         s = D.s[mask:squeeze()]
+        s = s:repeatTensor(act_dim)
         sPrime = D.sPrime[mask:squeeze()]
         r = D.r[mask:squeeze()]
         a_actual = D.a[mask:squeeze()]
@@ -148,38 +147,47 @@ for t=1,num_steps do
             possible = {state,action}
         end
         C = network:forward(possible):squeeze()
-        --TODO:vectorize this part too
         target = torch.zeros(mb_dim*act_dim)
         target_mask = torch.zeros(mb_dim*act_dim):byte()
+        Q_clone = Q:clone()
         for i=1,mb_dim do
             --you can experience all actions under threshold, since they all go to heaven!
             local known_flag = true
-            for j = 1,act_dim do
-                a = j
+            for a = 1,act_dim do
+                local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
                 local chance_unknown = (1 - H(C[mb_dim*(a-1)+i]))^(1/temp)
                 neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
                 if  chance_unknown > torch.rand(1)[1] then
-                    if a == D.a[mb_ind[i] ] then
+                    if a == a_actual[i] then--D.a[mb_ind[i] ] then
                         known_flag = false
                     end
                     local r = 1
                     if use_qnet then
                         target = r - y
-                    else
-                        Q[s[i]][a] = (1-alpha)*Q[s[i]][a] + (alpha)*r
                     end
-                    target[mb_dim*(a-1)+i] = r
-                    target_mask[mb_dim*(a-1)+i] = 1
+                    target[ind] = r
+                    target_mask[ind] = 1
                 end
             end
             --only experienced actions can be updated over threshold
             if known_flag then
                 --print('known!')
+                local ind = mb_dim*(a_actual[i]-1)+i
+                hist_total[s[i] ][a_actual[i]] = hist_total[s[i] ][a_actual[i]] + 1
+                target_mask[ind] = 1
                 if s[i] == num_state then
-                    Q[s[i]][a_actual[i]] = (1-alpha)*Q[s[i]][a_actual[i]] + (alpha)*r[i]
+                    target[ind] = r[i]
                 else
-                    Q[s[i]][a_actual[i]] = (1-alpha)*Q[s[i]][a_actual[i]] + (alpha)*(r[i]+gamma*torch.max(Q[sPrime[i]]))
+                    target[ind] = r[i]+gamma*torch.max(Q_clone[sPrime[i]])
+                end
+            end
+        end
+        for i=1,mb_dim do
+            for a=1,act_dim do
+                local ind = mb_dim*(a-1)+i
+                if target_mask[ind] == 1 then
+                    Q[s[i] ][a] = (1-alpha)*Q[s[i] ][a] + (alpha)*target[ind]
                 end
             end
         end
