@@ -28,7 +28,7 @@ softmax = nn.SoftMax():cuda()
 local num_steps = 1e5
 local cumloss =0 
 
-use_qnet = true
+--use_qnet = true
 if use_qnet then
     local hid_dim = 100
     local input = nn.Identity():cuda()()
@@ -66,7 +66,7 @@ epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 1e3
+refresh = 1e2
 bonus_hist = torch.zeros(num_steps/refresh)
 C = torch.zeros(mb_dim)
 neg_entropy = torch.zeros(num_state,act_dim)
@@ -131,6 +131,8 @@ for t=1,num_steps do
         r = 1
         net_reward = net_reward + r
     end
+    --shaping: 
+    --r = torch.exp(sPrime/num_state)
     --record history
     D.s[D.i] = s
     D.a[D.i] = a
