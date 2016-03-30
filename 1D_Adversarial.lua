@@ -2,7 +2,7 @@ require 'nngraph'
 require 'optim'
 require 'distributions'
 require 'gnuplot'
-in_dim = 2
+in_dim = 1
 hid_dim = 10
 out_dim = 1
 --Discrim
@@ -34,7 +34,7 @@ local net_reward = 0
 local mb_dim = 320
 local data = torch.zeros(mb_dim,in_dim)
 local target = torch.zeros(mb_dim,1)
-local mu = torch.randn(in_dim)
+local mu = torch.Tensor{4}
 local sigma = torch.rand(in_dim)
 local train_dis = function()
     network:training()
@@ -96,20 +96,19 @@ for i=1,num_steps do
         print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
         gnuplot.figure(plot2)
-        gnuplot.axis{-5,5,-5,5}
+        x_ax = torch.Tensor{1,7}
+        gnuplot.axis{x_ax[1],x_ax[2],-5,5}
         gnuplot.plot({data[{{mb_dim/2+1,-1}}],'+'},{data[{{1,mb_dim/2}}],'+'})
 
-        data = torch.rand(mb_dim,in_dim):add(-.5):mul(10)
+        data = torch.rand(mb_dim,in_dim):add(-.5):mul(x_ax[2]-x_ax[1]):add(x_ax[1]+(x_ax[2]-x_ax[1])/2)
         data2 = torch.rand(1000,in_dim):add(-.5):mul(10) 
         output = network:forward(data)
         total_data[{{mb_dim*(i/refresh-1)+1,mb_dim*(i/refresh)}}] = data
         total_output[{{mb_dim*(i/refresh-1)+1,mb_dim*(i/refresh)}}] = output
         gnuplot.figure(plot1)
+        gnuplot.axis{x_ax[1],x_ax[2],0,1}
         local values = distributions.mvn.pdf(data2,mu,sigma)
-        --gnuplot.scatter3({data[{{},1}],data[{{},2}],output[{{},1}]},{data2[{{},1}],data2[{{},2}],values[{{},1}]},{torch.Tensor{0,0},torch.Tensor{0,0},torch.Tensor{0,1}})
-        --gnuplot.raw('set pm3d map')
-        --gnuplot.scatter3(total_data[{{1,mb_dim*(i/refresh)},1}],total_data[{{1,mb_dim*(i/refresh)},2}],total_output[{{1,mb_dim*(i/refresh)},1}])
-        gnuplot.scatter3({total_data[{{1,mb_dim*(i/refresh)},1}],total_data[{{1,mb_dim*(i/refresh)},2}],total_output[{{1,mb_dim*(i/refresh)},1}]},{data2[{{},1}],data2[{{},2}],values[{{},1}]},{torch.Tensor{0,0},torch.Tensor{0,0},torch.Tensor{0,1}})
+        gnuplot.plot({total_data[{{1,mb_dim*(i/refresh)},1}],total_output[{{1,mb_dim*(i/refresh)},1}],'.'},{data2[{{},1}],values[{{},1}],'.'},{x_ax,torch.Tensor{.5,.5}})
         
         net_reward = 0
         cumloss = 0
