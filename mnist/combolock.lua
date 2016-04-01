@@ -28,7 +28,7 @@ softmax = nn.SoftMax():cuda()
 local num_steps = 1e5
 local cumloss =0 
 
---use_qnet = true
+use_qnet = true
 if use_qnet then
     local hid_dim = 100
     local input = nn.Identity():cuda()()
@@ -38,7 +38,7 @@ if use_qnet then
     q_network = nn.gModule({input},{output})
     q_w,q_dw = q_network:getParameters()
     q_config = {
-        learningRate  = 1e-4
+        learningRate  = 1e-3
         }
         mse_crit = nn.MSECriterion():cuda()
 end
@@ -61,10 +61,10 @@ end
 
 
 s = 1
-s_digit = digit[s][torch.random(digit[s]:size(1))]
+s_obs = digit[s][torch.random(digit[s]:size(1))]
 epsilon = .1
 alpha = .1
-gamma = .9
+gamma = .1 --.9
 net_reward = 0
 refresh = 1e2
 bonus_hist = torch.zeros(num_steps/refresh)
@@ -81,18 +81,18 @@ neg_entropy_over_time_correct = torch.zeros(num_steps/refresh,num_state)
 neg_entropy_over_time_incorrect = torch.zeros(num_steps/refresh,num_state)
 sa_visits = torch.zeros(num_state,act_dim)
 D = {}
-D.size = 1e4
+D.size = 1e5
 D.s = torch.zeros(D.size)
 D.a = torch.zeros(D.size)
 D.r = torch.zeros(D.size)
 D.sPrime = torch.zeros(D.size)
-D.digit = torch.zeros(D.size,digit[1]:size(2))--s digit
-D.digitPrime = torch.zeros(D.size,digit[1]:size(2))--sPrime digit
+D.obs = torch.zeros(D.size,digit[1]:size(2))--s digit
+D.obsPrime = torch.zeros(D.size,digit[1]:size(2))--sPrime digit
 D.i = 1
 local get_data = function(data,action_data)
     num = data:size(1)
     for i=1,num do
-        data[i] = D.digit[mb_ind[i]]
+        data[i] = D.obs[mb_ind[i]]
         if use_action then
             action_data[i] = torch.rand(act_dim):mul(noise_mag) 
             action_data[i][D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
@@ -113,9 +113,12 @@ for t=1,num_steps do
     r = 0
     --select action
     if use_qnet then
-        local vals = q_network:forward(s_digit:view(1,in_dim):cuda())
+        local vals = q_network:forward(s_obs:view(1,in_dim):cuda())
         _,a = vals:max(2)
         a = a[1]
+        if torch.rand(1)[1] < .1 then
+            a[1] = torch.random(act_dim)
+        end
     else
         _,a = torch.max(Q[s],1)
     end
@@ -123,7 +126,7 @@ for t=1,num_steps do
 
     --perform action
     sPrime = T[s][a]
-    sPrime_digit = digit[sPrime][torch.random(digit[sPrime]:size(1))]
+    sPrime_obs = digit[sPrime][torch.random(digit[sPrime]:size(1))]
     sa_visits[s][a] = sa_visits[s][a] + 1
     visits[sPrime] = visits[sPrime] + 1
 
@@ -132,14 +135,19 @@ for t=1,num_steps do
         net_reward = net_reward + r
     end
     --shaping: 
-    --r = torch.exp(sPrime/num_state)
+    --r =  gamma^(num_state-sPrime)
+    if sPrime > s then
+        r = 1 
+    else 
+        r = 0
+    end
     --record history
     D.s[D.i] = s
     D.a[D.i] = a
     D.r[D.i] = r
     D.sPrime[D.i] = sPrime
-    D.digit[D.i] = s_digit:clone() 
-    D.digitPrime[D.i] = sPrime_digit:clone() 
+    D.obs[D.i] = s_obs:clone() 
+    D.obsPrime[D.i] = sPrime_obs:clone() 
     D.i = (D.i % D.size) + 1
 
     --update model params
@@ -169,13 +177,13 @@ for t=1,num_steps do
         --
         for i=1,mb_dim do
             for a=1,act_dim do
-                state[mb_dim*(a-1)+i] = D.digit[mind[i][1] ]
+                state[mb_dim*(a-1)+i] = D.obs[mind[i][1] ]
             end
-            statePrime[i] = D.digitPrime[mind[i][1] ]
+            statePrime[i] = D.obsPrime[mind[i][1] ]
         end
         --]]
-        --state = D.digit[mask:expandAs(D.digit)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
-        --statePrime = D.digitPrime[mask:expandAs(D.digitPrime)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
+        --state = D.obs[mask:expandAs(D.obs)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
+        --statePrime = D.obsPrime[mask:expandAs(D.obsPrime)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
         if use_qnet then
             qPrime,qind = q_network:forward(statePrime:cuda()):max(2)
         else
@@ -199,6 +207,7 @@ for t=1,num_steps do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
                 local chance_unknown = (1 - H(C[ind]))^(1/temp)
+                chance_unknown = 0
                 neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
                 if  chance_unknown > torch.rand(1)[1] then
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
@@ -258,7 +267,7 @@ for t=1,num_steps do
         end
     end
     s = sPrime
-    s_digit = sPrime_digit:clone() 
+    s_obs = sPrime_obs:clone() 
     if t % refresh == 0 then
         gnuplot.figure(1)
         gnuplot.raw("set multiplot layout 2,4 columnsfirst")
@@ -272,7 +281,7 @@ for t=1,num_steps do
             local Q = q_network:forward(data)
             gnuplot.raw("set title 'Q-values' ")
             gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
-            gnuplot.raw('set yrange [-1:1] noreverse')
+            gnuplot.raw('set yrange [*:*] noreverse')
             gnuplot.plot({Q:mean(2)},{Q:max(2):double()},{Q:min(2):double()})
             --gnuplot.imagesc(Q)
         else
