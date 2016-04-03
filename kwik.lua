@@ -85,7 +85,7 @@ for i = 1,1e5 do
         print(i,cumloss/refresh,w:norm(),dw:norm())
         gnuplot.raw("set multiplot layout 2,2 columnsfirst")
         --gnuplot.figure(1)
-        local o = network:forward{D.s,D.a}
+        local o = network:forward{D.s:cat(torch.rand(10,state_dim):gt(.4):double(),1),D.a:cat(torch.rand(10,act_dim):gt(.3):double(),1)}
         gnuplot.imagesc(o)
         --gnuplot.figure(2)
         gnuplot.imagesc(D.sPrime)

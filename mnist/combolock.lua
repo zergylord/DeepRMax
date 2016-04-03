@@ -12,15 +12,26 @@ log2 = function(x) return torch.log(x)/torch.log(2) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
 noise_mag = .05
 thresh = .92 --.2 --.04
-temp = .5
-use_action = true
+temp = 1 --.5
 
 act_dim = 4
+num_state = 20
 
+
+s = 1
 local timer = torch.Timer()
-
-digit = torch.load('digit.t7')
-
+--use_mnist = true
+if use_mnist then
+    digit = torch.load('digit.t7')
+    s_obs = digit[s][torch.random(digit[s]:size(1))]
+else
+    --setup MDP
+    --A = torch.eye(act_dim)
+    A = torch.tril(torch.ones(act_dim,act_dim))
+    --S = torch.eye(num_state)
+    S = torch.tril(torch.ones(num_state,num_state))
+    s_obs = S[s]
+end
 --require 'train_sa_GAN.lua'
 require 'train_policy_GAN.lua'
 softmax = nn.SoftMax():cuda()
@@ -28,7 +39,7 @@ softmax = nn.SoftMax():cuda()
 local num_steps = 1e5
 local cumloss =0 
 
-use_qnet = true
+--use_qnet = true
 if use_qnet then
     local hid_dim = 100
     local input = nn.Identity():cuda()()
@@ -45,7 +56,6 @@ end
 
 
 
-num_state = 10
 Q = torch.zeros(num_state,act_dim)
 --Q = torch.rand(num_state,act_dim):mul(-1)
 T = torch.ones(num_state,act_dim)
@@ -60,11 +70,9 @@ end
 
 
 
-s = 1
-s_obs = digit[s][torch.random(digit[s]:size(1))]
 epsilon = .1
 alpha = .1
-gamma = .1 --.9
+gamma = .9
 net_reward = 0
 refresh = 1e2
 bonus_hist = torch.zeros(num_steps/refresh)
@@ -86,17 +94,17 @@ D.s = torch.zeros(D.size)
 D.a = torch.zeros(D.size)
 D.r = torch.zeros(D.size)
 D.sPrime = torch.zeros(D.size)
-D.obs = torch.zeros(D.size,digit[1]:size(2))--s digit
-D.obsPrime = torch.zeros(D.size,digit[1]:size(2))--sPrime digit
+D.obs = torch.zeros(D.size,in_dim)--s digit
+D.obsPrime = torch.zeros(D.size,in_dim)--sPrime digit
 D.i = 1
 local get_data = function(data,action_data)
     num = data:size(1)
     for i=1,num do
         data[i] = D.obs[mb_ind[i]]
-        if use_action then
-            action_data[i] = torch.rand(act_dim):mul(noise_mag) 
-            action_data[i][D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
-        end
+        --action_data[i] = torch.rand(act_dim):mul(noise_mag) 
+        --action_data[i][D.a[mb_ind[i] ] ] = 1 - torch.rand(1):mul(noise_mag)[1]
+        action_data[i] = A[D.a[mb_ind[i] ] ] + torch.rand(act_dim) 
+        action_data[i] = action_data[i]:div(action_data[i]:max()) 
     end
 end
 set_data_func(get_data)
@@ -126,7 +134,12 @@ for t=1,num_steps do
 
     --perform action
     sPrime = T[s][a]
-    sPrime_obs = digit[sPrime][torch.random(digit[sPrime]:size(1))]
+    if use_mnist then
+        sPrime_obs = digit[sPrime][torch.random(digit[sPrime]:size(1))]
+    else
+        sPrime_obs = S[sPrime]
+    end
+
     sa_visits[s][a] = sa_visits[s][a] + 1
     visits[sPrime] = visits[sPrime] + 1
 
@@ -134,13 +147,14 @@ for t=1,num_steps do
         r = 1
         net_reward = net_reward + r
     end
-    --shaping: 
-    --r =  gamma^(num_state-sPrime)
+    --[[shaping: 
+    r =  gamma^(num_state-sPrime)
     if sPrime > s then
         r = 1 
     else 
         r = 0
     end
+    --]]
     --record history
     D.s[D.i] = s
     D.a[D.i] = a
@@ -159,7 +173,10 @@ for t=1,num_steps do
         for i =1,mb_dim do
             mask[mb_ind[i] ] = 1
             for a = 1,act_dim  do
-                action[mb_dim*(a-1)+i][a] = 1-torch.rand(1):mul(noise_mag)[1]
+                --action[mb_dim*(a-1)+i][a] = 1-torch.rand(1):mul(noise_mag)[1]
+                --action[mb_dim*(a-1)+i] = A[a] 
+                action[mb_dim*(a-1)+i] = A[D.a[mb_ind[i] ] ] + torch.rand(act_dim) 
+                action[mb_dim*(a-1)+i] = action[mb_dim*(a-1)+i]:div(action[mb_dim*(a-1)+i]:max()) 
             end
         end
         mind = mask:nonzero()
@@ -207,7 +224,7 @@ for t=1,num_steps do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
                 local chance_unknown = (1 - H(C[ind]))^(1/temp)
-                chance_unknown = 0
+                --chance_unknown = 0
                 neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
                 if  chance_unknown > torch.rand(1)[1] then
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
@@ -274,11 +291,17 @@ for t=1,num_steps do
 
 
         if use_qnet then
-            local data = torch.zeros(num_state,in_dim):cuda()
-            for s = 1,num_state do
-                data[s] = digit[s][torch.random(digit[s]:size(1))]
+            local Q
+            if use_mnist then
+                local data = torch.zeros(num_state,in_dim):cuda()
+                for s = 1,num_state do
+                    data[s] = digit[s][torch.random(digit[s]:size(1))]
+                end
+                Q = q_network:forward(data)
+            else
+                Q = q_network:forward(S)
             end
-            local Q = q_network:forward(data)
+
             gnuplot.raw("set title 'Q-values' ")
             gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
             gnuplot.raw('set yrange [*:*] noreverse')
@@ -359,9 +382,13 @@ for t=1,num_steps do
         network:evaluate() 
         local iter = 10
         for s = 1,num_state do
-            local state = torch.zeros(iter,digit[s]:size(2))
+            local state = torch.zeros(iter,in_dim)
             for i=1,iter do
-                state[i] = digit[s][torch.random(digit[s]:size(1))] 
+                if use_mnist then
+                    state[i] = digit[s][torch.random(digit[s]:size(1))] 
+                else
+                    state[i] = S[s] 
+                end
             end
             for a=1,act_dim do
                 local action = torch.rand(iter,act_dim):mul(noise_mag)

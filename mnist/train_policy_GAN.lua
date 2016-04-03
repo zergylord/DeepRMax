@@ -9,19 +9,24 @@ require 'distributions'
 require 'gnuplot'
 require 'hdf5'
 torch.setnumthreads(1)
-f = hdf5.open('mnist.hdf5')
-mnist_data = f:read():all()
-mask = mnist_data.t_train:ne(8):reshape(50000,1):expandAs(mnist_data.x_train)
-not8 = mnist_data.x_train[mask]
-in_dim = mnist_data.x_train:size(2)
-not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
-notnot8 = mnist_data.x_train[mask:eq(0)]
-notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
-act_dict = torch.eye(act_dim):float()
-if use_gpu then
-    act_dict = act_dict:cuda()
-    notnot8 = notnot8:cuda()
-    not8 = not8:cuda()
+--use_mnist = true
+if use_mnist then
+    f = hdf5.open('mnist.hdf5')
+    mnist_data = f:read():all()
+    mask = mnist_data.t_train:ne(8):reshape(50000,1):expandAs(mnist_data.x_train)
+    not8 = mnist_data.x_train[mask]
+    in_dim = mnist_data.x_train:size(2)
+    not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
+    notnot8 = mnist_data.x_train[mask:eq(0)]
+    notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
+    act_dict = torch.eye(act_dim):float()
+    if use_gpu then
+        act_dict = act_dict:cuda()
+        notnot8 = notnot8:cuda()
+        not8 = not8:cuda()
+    end
+else
+    in_dim = num_state
 end
 hid_dim = 1000
 gen_hid_dim = 1000
