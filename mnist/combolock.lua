@@ -15,7 +15,7 @@ thresh = .92 --.2 --.04
 temp = 1 --.5
 
 act_dim = 4
-num_state = 20
+num_state = 30
 
 
 s = 1
@@ -36,7 +36,7 @@ end
 require 'train_policy_GAN.lua'
 softmax = nn.SoftMax():cuda()
 
-local num_steps = 1e5
+local num_steps = 1e6
 local cumloss =0 
 
 --use_qnet = true
@@ -74,7 +74,7 @@ epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 1e2
+refresh = 1e3
 bonus_hist = torch.zeros(num_steps/refresh)
 C = torch.zeros(mb_dim)
 neg_entropy = torch.zeros(num_state,act_dim)
@@ -224,7 +224,10 @@ for t=1,num_steps do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
                 local chance_unknown = (1 - H(C[ind]))^(1/temp)
-                --chance_unknown = 0
+                --nan check
+                if chance_unknown ~= chance_unknown then
+                    chance_unknown = 1
+                end
                 neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
                 if  chance_unknown > torch.rand(1)[1] then
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
