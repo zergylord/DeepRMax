@@ -8,6 +8,7 @@ require 'optim'
 require 'distributions'
 require 'gnuplot'
 require 'hdf5'
+require 'cuReparametrize'
 torch.setnumthreads(1)
 --use_mnist = true
 if use_mnist then
@@ -26,7 +27,7 @@ if use_mnist then
         not8 = not8:cuda()
     end
 else
-    in_dim = num_state
+    in_dim = num_state or 10
 end
 hid_dim = 1000
 gen_hid_dim = 1000
@@ -46,10 +47,21 @@ if use_gpu then
     network = nn.gModule({input,action},{output})
     --Gen
     local input = nn.Identity():cuda()()
-    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input)))
-    --local output =nn.SoftMax():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(hid))
-    local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(hid))
-    gen_network = nn.gModule({input},{output})
+    local noise = nn.Identity():cuda()()
+    noise_dim = 4
+    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.CMulTable():cuda(){nn.Linear(in_dim,gen_hid_dim):cuda()(input),nn.Linear(noise_dim,gen_hid_dim):cuda()(noise)}))
+    --local hid = (nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input) ))
+    --local hid = (nn.ReLU():cuda()(nn.CMulTable():cuda(){nn.Linear(in_dim,gen_hid_dim):cuda()(input),nn.Linear(noise_dim,gen_hid_dim):cuda()(noise)} ))
+    --local hid2 = (nn.ReLU():cuda()(nn.Linear(gen_hid_dim,gen_hid_dim):cuda()(hid)))
+    --[[
+    dist_dim = gen_hid_dim
+    local mu = nn.Linear(gen_hid_dim,dist_dim):cuda()(hid)
+    local sigma = nn.Linear(gen_hid_dim,dist_dim):cuda()(hid)
+    local last_hid = nn.Reparametrize(dist_dim)({mu,sigma})
+    --]]
+    local last_hid = hid
+    local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(last_hid))
+    gen_network = nn.gModule({input,noise},{output})
 else
     --Discrim
     local input = nn.Identity()()
@@ -65,10 +77,11 @@ else
     gen_network = nn.gModule({input},{output})
 end
 --full
-local full_input = nn.Identity()()
-connect= gen_network(full_input)
-local full_out = network{full_input,connect}
-full_network = nn.gModule({full_input},{full_out})
+local input = nn.Identity()()
+local noise = nn.Identity()()
+connect= gen_network{input,noise}
+local full_out = network{input,connect}
+full_network = nn.gModule({input,noise},{full_out})
 
 
 w,dw = full_network:getParameters()
@@ -117,13 +130,19 @@ local get_data = function(data,action_data)
         action_data[i][torch.random(act_dim)] = 1 - torch.rand(1):mul(noise_mag)[1]
     end
 end
+get_noise = function(dim)
+    return distributions.cat.rnd(dim,torch.ones(noise_dim),{categories=torch.eye(noise_dim)}):cuda()
+    --return torch.zeros(dim,noise_dim):cuda()
+end
+
 local train_dis = function()
     --gen_network:evaluate()
     network:training()
     data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
 
     local output
-    action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward(data[{{mb_dim/2+1,-1}}])
+    --action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward(data[{{mb_dim/2+1,-1}}])
+    action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward{data[{{mb_dim/2+1,-1}}],get_noise(mb_dim/2)}
     output = network:forward{data,action_data}
     last_compare = output
 
@@ -137,16 +156,19 @@ end
 local train_gen = function()
     network:evaluate()
     --network:training()
-    local noise_data
     data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
-    local output = full_network:forward(data)
+    local noise_data = get_noise(mb_dim)
+    local output = full_network:forward{data,noise_data}
     local loss = bce_crit:forward(output,gen_target)
     local grad = bce_crit:backward(output,gen_target)
-    full_network:backward(noise_data,grad)
-
+    full_network:backward({data,noise_data},grad)
+    --
+    --grad = network:backward({data,gen_network.output},grad)[2]
     loss = loss + bce_crit:forward(gen_network.output,action_data)
-    local grad = bce_crit:backward(gen_network.output,action_data)
-    gen_network:backward(noise_data,grad)
+    --grad = grad + bce_crit:backward(gen_network.output,action_data)
+    grad = bce_crit:backward(gen_network.output,action_data)
+    gen_network:backward({data,noise_data},grad)
+    --]]
     return loss,dw
 end
 --[[
