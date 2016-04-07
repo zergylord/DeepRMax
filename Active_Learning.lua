@@ -17,12 +17,25 @@ noise_dim = 20
 gen_hid_dim = 10
 local input = nn.Identity()()
 local hid = nn.ReLU()(nn.Linear(noise_dim,gen_hid_dim)(input))
-local output = nn.Linear(gen_hid_dim,in_dim)(hid)
+local last_hid = nn.ReLU()(nn.Linear(gen_hid_dim,gen_hid_dim)(hid))
+local output = nn.Linear(gen_hid_dim,in_dim)(last_hid)
 gen_network = nn.gModule({input},{output})
+--Pessimal Gen
+noise_dim = 20
+gen_hid_dim = 10
+local input = nn.Identity()()
+local hid = nn.Tanh()(nn.Linear(noise_dim,gen_hid_dim)(input))
+local output = nn.Linear(gen_hid_dim,in_dim)(hid)
+pes_gen_network = nn.gModule({input},{output})
+pes_w,pes_dw = pes_gen_network:getParameters()
+pes_config = {
+    learningRate  = 1e-3
+    }
 
 --full
 local full_input = nn.Identity()()
-local connect= nn.GradientReversal()(gen_network(full_input))
+--local connect= nn.GradientReversal()(gen_network(full_input))
+local connect= gen_network(full_input)
 local full_out = network(connect)
 full_network = nn.gModule({full_input},{full_out})
 
@@ -61,12 +74,29 @@ local train_gen = function()
     network:evaluate()
 
     local noise_data = torch.randn(mb_dim,noise_dim)
-    target:zero()
+    target:zero():add(1)
     local output = full_network:forward(noise_data)
     local loss = bce_crit:forward(output,target)
     local grad = bce_crit:backward(output,target)
     full_network:backward(noise_data,grad)
     return loss,dw
+end
+local train_pes_gen = function(x)
+    if x ~= pes_w then
+        pes_w:copy(x)
+    end
+    network:evaluate()
+    pes_gen_network:zeroGradParameters()
+
+    local noise_data = torch.randn(mb_dim,noise_dim)
+    target:zero()
+    local fake = pes_gen_network:forward(noise_data)
+    local output = network:forward(fake)
+    local loss = bce_crit:forward(output,target)
+    local grad = bce_crit:backward(output,target)
+    local gen_grad = network:backward(fake,grad)
+    pes_gen_network:backward(noise_data,gen_grad)
+    return loss,pes_dw
 end
 train = function(x)
     if x ~= w then
@@ -77,7 +107,7 @@ train = function(x)
     loss = loss + train_gen()
     network:zeroGradParameters()
     --sees 3x fake examples, if not zerod
-    for i = 1,5 do
+    for i = 1,1 do
         loss = loss + train_dis()
     end
     return loss,dw
@@ -86,7 +116,7 @@ config = {
     learningRate  = 1e-3
     }
 local num_steps = 1e6
-local refresh = 1e2
+local refresh = 1e1
 local cumloss =0 
 local plot1 = gnuplot.figure()
 local plot2 = gnuplot.figure()
@@ -128,22 +158,46 @@ get_best_random_sample = function()
     local _,ind =  mb_H(output):min(1)
     return d[ind[1][1] ][1]
 end
+pes_qual = 1
+pes_qual_count = 0
+get_pes_sample = function()
+    local noise_data = torch.randn(1,noise_dim)
+    local fake = pes_gen_network:forward(noise_data)
+    local output = network:forward(fake)
+    pes_qual = (pes_qual*pes_qual_count + (1-H(output[1][1])))/(pes_qual_count+1)
+    pes_qual_count = pes_qual_count + 1
+    return fake[1]
+end
+
+
 
 for i=1,num_steps do
         dind = dind + 1
         --data[dind] = get_adverse_sample()
-        data[dind] = get_best_random_sample()
-        x,batchloss = optim.rmsprop(train,w,config)
+        --data[dind] = get_best_random_sample()
+        data[dind] = get_pes_sample()
+        --data[dind] = torch.randn(1):add(4):mul(10)
+        _,batchloss = optim.adam(train,w,config)
+        for iter = 1,5 do
+            optim.adam(train_pes_gen,pes_w,config_pes)
+        end
     cumloss = cumloss + batchloss[1]
     if i %refresh == 0 then
-        print(i,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
+        print(i,pes_qual,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
-        gnuplot.figure(plot2)
         x_ax = torch.Tensor{1,7}
-        --gnuplot.axis{x_ax[1],x_ax[2],-5,5}
-        --gnuplot.plot({mb_data[{{mb_dim/2+1,-1}}],'+'},{mb_data[{{1,mb_dim/2}}],'+'})
+        gnuplot.figure(2)
+        gnuplot.axis{-30,30,'',''}
+        gnuplot.title('gen data')
         gnuplot.hist(gen_network:forward(torch.randn(dind,noise_dim)))
+        gnuplot.figure(4)
+        gnuplot.axis{-30,30,'',''}
+        gnuplot.title('pes data')
+        gnuplot.hist(pes_gen_network:forward(torch.randn(dind,noise_dim)))
         gnuplot.figure(3)
+        gnuplot.axis{-30,30,'',''}
+        gnuplot.title('real data')
+        --gnuplot.hist(data[{{dind-refresh+1,dind}}])
         gnuplot.hist(data[{{1,dind}}])
 
         data1 = torch.rand(mb_dim,in_dim):add(-.5):mul(x_ax[2]-x_ax[1]):add(x_ax[1]+(x_ax[2]-x_ax[1])/2)
@@ -151,7 +205,7 @@ for i=1,num_steps do
         output = network:forward(data1)
         total_data[{{mb_dim*(i/refresh-1)+1,mb_dim*(i/refresh)}}] = data1
         total_output[{{mb_dim*(i/refresh-1)+1,mb_dim*(i/refresh)}}] = output
-        gnuplot.figure(plot1)
+        gnuplot.figure(1)
         gnuplot.axis{x_ax[1],x_ax[2],0,1}
         local values = distributions.mvn.pdf(data2,mu,sigma)
         gnuplot.plot({total_data[{{1,mb_dim*(i/refresh)},1}],total_output[{{1,mb_dim*(i/refresh)},1}],'.'},{data2[{{},1}],values[{{},1}],'.'},{x_ax,torch.Tensor{.5,.5}})

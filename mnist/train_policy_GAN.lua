@@ -143,6 +143,10 @@ local train_gen = function()
     local loss = bce_crit:forward(output,gen_target)
     local grad = bce_crit:backward(output,gen_target)
     full_network:backward(noise_data,grad)
+
+    loss = loss + bce_crit:forward(gen_network.output,action_data)
+    local grad = bce_crit:backward(gen_network.output,action_data)
+    gen_network:backward(noise_data,grad)
     return loss,dw
 end
 --[[

@@ -12,22 +12,23 @@ log2 = function(x) return torch.log(x)/torch.log(2) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
 noise_mag = .05
 thresh = .92 --.2 --.04
-temp = 1 --.5
+temp = 2 --.5
 
 act_dim = 4
-num_state = 30
 
 
 s = 1
 local timer = torch.Timer()
---use_mnist = true
+use_mnist = true
+--A = torch.eye(act_dim)
+A = torch.tril(torch.ones(act_dim,act_dim))
 if use_mnist then
+    num_state = 10
     digit = torch.load('digit.t7')
     s_obs = digit[s][torch.random(digit[s]:size(1))]
 else
+    num_state = 10
     --setup MDP
-    --A = torch.eye(act_dim)
-    A = torch.tril(torch.ones(act_dim,act_dim))
     --S = torch.eye(num_state)
     S = torch.tril(torch.ones(num_state,num_state))
     s_obs = S[s]
@@ -39,7 +40,7 @@ softmax = nn.SoftMax():cuda()
 local num_steps = 1e6
 local cumloss =0 
 
---use_qnet = true
+use_qnet = true
 if use_qnet then
     local hid_dim = 100
     local input = nn.Identity():cuda()()
@@ -302,7 +303,7 @@ for t=1,num_steps do
                 end
                 Q = q_network:forward(data)
             else
-                Q = q_network:forward(S)
+                Q = q_network:forward(S:cuda())
             end
 
             gnuplot.raw("set title 'Q-values' ")
