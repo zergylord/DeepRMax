@@ -10,16 +10,16 @@ torch.setnumthreads(1)
 log2 = function(x) return torch.log(x)/torch.log(2) end
 --H = function(p) return log2(p):cmul(-p)-log2(-p+1):cmul(-p+1) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
-noise_mag = .05
+noise_mag = 0--.05
 thresh = .92 --.2 --.04
-temp =  2 --.5
+temp =  .5
 
 act_dim = 4
 
 
 s = 1
 local timer = torch.Timer()
-use_qnet = true
+--use_qnet = true
 use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
@@ -35,8 +35,8 @@ else
     s_obs = S[s]
 end
 --require 'train_sa_GAN.lua'
-require 'train_policy_GAN.lua'
---require 'train_distinguish.lua'
+--require 'train_policy_GAN.lua'
+require 'train_distinguish.lua'
 softmax = nn.SoftMax()
 
 local num_steps = 1e6
@@ -76,7 +76,7 @@ epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 1e2
+refresh = 1e3
 bonus_hist = torch.zeros(num_steps/refresh)
 C = torch.zeros(mb_dim)
 neg_entropy = torch.zeros(num_state,act_dim)
@@ -237,6 +237,8 @@ for t=1,num_steps do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
                 local chance_unknown = (1 - H(C[ind]))^(1/temp)
+                --local chance_unknown = (1- C[ind])^5
+
                 --nan check
                 if chance_unknown ~= chance_unknown then
                     chance_unknown = 1
@@ -419,10 +421,10 @@ for t=1,num_steps do
         
         gnuplot.raw("set title 'current D estimates' ")
         gnuplot.imagesc(cur_known)
-        --gnuplot.raw("set title 'total visits' ")
-        --gnuplot.imagesc(sa_visits:log1p())
-        gnuplot.raw("set title 'actions' ")
-        gnuplot.imagesc(action_data)
+        gnuplot.raw("set title 'total visits' ")
+        gnuplot.imagesc(sa_visits:log1p())
+        --gnuplot.raw("set title 'actions' ")
+        --gnuplot.imagesc(action_data)
         print(action_data[1])
         print(action_data[-1])
         

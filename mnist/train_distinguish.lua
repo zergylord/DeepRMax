@@ -70,12 +70,16 @@ train = function(x)
     data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
 
     local output
+    --[[
     local vals = q_network:forward(data[{{mb_dim/2+1,-1}}])
     local _,inds = vals:max(2)
     action_data[{{mb_dim/2+1,-1}}]:zero()
     for i = 1,mb_dim/2 do
-        action_data[mb_dim/2+i][inds[i][1]]  = 1
+        action_data[mb_dim/2+i][inds[i][1] ]  = 1
     end
+    --]]
+    action_data[{{mb_dim/2+1,-1}}] = distributions.cat.rnd(mb_dim/2,torch.ones(act_dim),{categories=torch.eye(act_dim)})
+
     output = network:forward{data,action_data}
     last_compare = output
 
