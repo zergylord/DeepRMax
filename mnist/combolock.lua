@@ -36,7 +36,8 @@ else
 end
 --require 'train_sa_GAN.lua'
 --require 'train_policy_GAN.lua'
-require 'train_distinguish.lua'
+--require 'train_distinguish.lua'
+require 'train_NCE.lua'
 softmax = nn.SoftMax()
 
 local num_steps = 1e6
@@ -227,7 +228,10 @@ for t=1,num_steps do
         else
             possible = {state,action}
         end
-        C = network:forward(possible):squeeze()
+        --C = network:forward(possible):squeeze()
+        local probs =  network:forward(possible)[2]
+        C = probs:div(probs:sum()):squeeze()
+        
         target = torch.zeros(mb_dim*act_dim)
         target_mask = torch.zeros(mb_dim*act_dim,1):byte()
         for i=1,mb_dim do
@@ -236,15 +240,17 @@ for t=1,num_steps do
             for a = 1,act_dim do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
-                local chance_unknown = (1 - H(C[ind]))^(1/temp)
+                i--local chance_unknown = (1 - H(C[ind]))^(1/temp)
                 --local chance_unknown = (1- C[ind])^5
+                local chance_unknown = 1 - C[ind]
 
                 --nan check
                 if chance_unknown ~= chance_unknown then
                     chance_unknown = 1
                 end
                 neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
-                if  chance_unknown > torch.rand(1)[1] then
+                --if  chance_unknown > torch.rand(1)[1] then
+                if  chance_unknown > .97 then
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
                         known_flag = false
                     end
