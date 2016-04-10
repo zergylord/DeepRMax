@@ -19,7 +19,7 @@ act_dim = 4
 
 s = 1
 local timer = torch.Timer()
---use_qnet = true
+use_qnet = true
 use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
@@ -77,7 +77,7 @@ epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 1e3
+refresh = 5e2
 bonus_hist = torch.zeros(num_steps/refresh)
 C = torch.zeros(mb_dim)
 neg_entropy = torch.zeros(num_state,act_dim)
@@ -189,7 +189,7 @@ for t=1,num_steps do
                     action[mb_dim*(a-1)+i] = action[mb_dim*(a-1)+i]:div(action[mb_dim*(a-1)+i]:max()) 
                     --]]
                 else
-                    action[mb_dim*(a-1)+i] = A[D.a[mb_ind[i] ] ]
+                    action[mb_dim*(a-1)+i][a] = 1
                 end
             end
         end
@@ -229,8 +229,11 @@ for t=1,num_steps do
             possible = {state,action}
         end
         --C = network:forward(possible):squeeze()
-        local probs =  network:forward(possible)[2]
-        C = probs:div(probs:sum()):squeeze()
+    
+        --local probs = network:forward(possible)[2]:reshape(act_dim,mb_dim):t()
+        --C = probs:cdiv(probs:sum(2):expandAs(probs)):reshape(mb_dim*act_dim)
+        C = network:forward(possible)[1]:squeeze()
+    
         
         target = torch.zeros(mb_dim*act_dim)
         target_mask = torch.zeros(mb_dim*act_dim,1):byte()
@@ -240,17 +243,20 @@ for t=1,num_steps do
             for a = 1,act_dim do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
-                i--local chance_unknown = (1 - H(C[ind]))^(1/temp)
+                --local chance_unknown = (1 - H(C[ind]))^(1/temp)
                 --local chance_unknown = (1- C[ind])^5
-                local chance_unknown = 1 - C[ind]
+                local chance_unknown = C[ind] < .001 --.1
 
                 --nan check
                 if chance_unknown ~= chance_unknown then
                     chance_unknown = 1
                 end
-                neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
+                if chance_unknown then
+                    neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + 1
+                end
+                --neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
                 --if  chance_unknown > torch.rand(1)[1] then
-                if  chance_unknown > .97 then
+                if  chance_unknown then
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
                         known_flag = false
                     end
@@ -417,9 +423,10 @@ for t=1,num_steps do
             for a=1,act_dim do
                 local action = torch.rand(iter,act_dim):mul(noise_mag)
                 action[{{},a}] = -torch.rand(iter):mul(noise_mag)+1
-                local out = network:forward{state:cuda(),action:cuda()}:double()
+                local out = network:forward{state:cuda(),action:cuda()}[1]:double()
                 for i=1,iter do
-                    cur_known[s][a] = cur_known[s][a] + ((1- H(out[i]))^(1/temp)) /iter
+                    --cur_known[s][a] = cur_known[s][a] + ((1- H(out[i]))^(1/temp)) /iter
+                    cur_known[s][a] = cur_known[s][a] + out[{i,1}] /iter
                 end
             end
         end
@@ -427,10 +434,16 @@ for t=1,num_steps do
         
         gnuplot.raw("set title 'current D estimates' ")
         gnuplot.imagesc(cur_known)
+        --[[
         gnuplot.raw("set title 'total visits' ")
         gnuplot.imagesc(sa_visits:log1p())
-        --gnuplot.raw("set title 'actions' ")
-        --gnuplot.imagesc(action_data)
+        --]]
+        --[[
+        gnuplot.raw("set title 'actions' ")
+        gnuplot.imagesc(action_data)
+        --]]
+        gnuplot.raw("set title 'visits over time' ")
+        gnuplot.imagesc(visits_over_time[{{1,t/refresh}}]:log1p())
         print(action_data[1])
         print(action_data[-1])
         

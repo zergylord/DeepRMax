@@ -26,7 +26,7 @@ if use_mnist then
         not8 = not8:cuda()
     end
 else
-    in_dim = num_state
+    in_dim = num_state or 10
 end
 hid_dim = 1000
 gen_hid_dim = 1000
@@ -40,8 +40,8 @@ local action = nn.Identity():cuda()()
 hid_lin = nn.Linear(in_dim,hid_dim):cuda()
 hid = nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(hid_lin(input)))
 local factor = nn.Dropout(dropout):cuda()(nn.CMulTable():cuda(){nn.Linear(hid_dim,fact_dim):cuda()(hid),nn.Linear(act_dim,fact_dim):cuda()(action)})
-local prob = nn.SoftPlus():cuda()(nn.Linear(fact_dim,out_dim):cuda())
-local denom = nn.AddConstant(4):cuda()(prob)
+local prob = nn.SoftPlus():cuda()(nn.Linear(fact_dim,out_dim):cuda()(factor))
+local denom = nn.AddConstant(.25):cuda()(prob)
 local output = nn.CDivTable():cuda(){prob,denom}
 network = nn.gModule({input,action},{output,prob})
 
@@ -61,24 +61,24 @@ dis_target[{{1,mb_dim/2}}] = torch.ones(mb_dim/2):cuda()
 --single training step
 --assumes get_data has been set to a minibatch generating function
 --]]
-
+local dummy_grad = torch.zeros(mb_dim,1):cuda()
 train = function(x)
     if x ~= w then
         w:copy(x)
     end
     network:zeroGradParameters()
     network:training()
-    data_func(data[{{1,mb_dim/2}}],action_data[{{1,mb_dim/2}}])
+    data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
 
     local output
     action_data[{{mb_dim/2+1,-1}}] = distributions.cat.rnd(mb_dim/2,torch.ones(act_dim),{categories=torch.eye(act_dim)})
 
-    output = network:forward{data,action_data}
+    output = network:forward{data,action_data}[1]
     last_compare = output
 
     local loss = bce_crit:forward(output,dis_target)
     local grad = bce_crit:backward(output,dis_target)
-    network:backward({data,action_data},{grad,torch.zeros(mb_dim,1)})
+    network:backward({data,action_data},{grad,dummy_grad})
     return loss,dw
 end
 --[[
@@ -89,6 +89,22 @@ end
 set_data_func = function(func)
     data_func = func
 end
-config = {
-    learningRate  = 1e-3
-    }
+standard = function()
+    config = {
+        learningRate  = 1e-3
+        }
+    get_data = function(data,action_data)
+        local dim = data:size(1)
+        action_data[{{}}] = torch.Tensor{{1,0,0,0}}:repeatTensor(dim,1)
+        data[{{}}] = torch.rand(dim,10)
+    end
+    set_data_func(get_data)
+    for i = 1,1e6 do
+        optim.adam(train,w,config)
+        if i % 1e3==0 then
+            print(network.output[1][{1,1}],network.output[1][{mb_dim/2+1,1}])
+            gnuplot.imagesc(action_data)
+        end
+    end
+end
+

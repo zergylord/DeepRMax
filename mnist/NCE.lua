@@ -20,7 +20,7 @@ hid_dim = 100
 input = nn.Identity()()
 hid = nn.ReLU()(nn.Linear(in_dim,hid_dim)(input))
 prob = nn.SoftPlus()(nn.Linear(hid_dim,1)(hid))
-denom = nn.AddConstant(40)(prob)
+denom = nn.AddConstant(.25)(prob)
 output = nn.CDivTable(){prob,denom}
 network = nn.gModule({input},{output,prob})
 w,dw = network:getParameters()
@@ -65,9 +65,9 @@ for i=1,num_steps do
         gnuplot.bar(network.output[1][{{},1}])
         gnuplot.axis{.5,in_dim+.5,0,1}
         gnuplot.figure(2)
-        --gnuplot.bar(network.output[2][{{},1}])
+        gnuplot.bar(network.output[2][{{},1}])
         --gnuplot.axis{.5,in_dim+.5,0,30}
-        gnuplot.bar(network.output[2][{{},1}]:div(network.output[2]:sum()))
+        --gnuplot.bar(network.output[2][{{},1}]:div(network.output[2]:sum()))
         --gnuplot.bar(torch.cdiv(d_dist,d_dist+g_dist))
         gnuplot.axis{.5,in_dim+.5,0,1}
         cumloss = 0
