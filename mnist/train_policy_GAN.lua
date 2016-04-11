@@ -47,21 +47,17 @@ if use_gpu then
     network = nn.gModule({input,action},{output})
     --Gen
     local input = nn.Identity():cuda()()
+    local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input)))
+    local output = nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(hid))
+    gen_network = nn.gModule({input},{output})
+    --[[
     local noise = nn.Identity():cuda()()
     noise_dim = 4
     local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.CMulTable():cuda(){nn.Linear(in_dim,gen_hid_dim):cuda()(input),nn.Linear(noise_dim,gen_hid_dim):cuda()(noise)}))
-    --local hid = (nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input) ))
-    --local hid = (nn.ReLU():cuda()(nn.CMulTable():cuda(){nn.Linear(in_dim,gen_hid_dim):cuda()(input),nn.Linear(noise_dim,gen_hid_dim):cuda()(noise)} ))
-    --local hid2 = (nn.ReLU():cuda()(nn.Linear(gen_hid_dim,gen_hid_dim):cuda()(hid)))
-    --[[
-    dist_dim = gen_hid_dim
-    local mu = nn.Linear(gen_hid_dim,dist_dim):cuda()(hid)
-    local sigma = nn.Linear(gen_hid_dim,dist_dim):cuda()(hid)
-    local last_hid = nn.Reparametrize(dist_dim)({mu,sigma})
-    --]]
     local last_hid = hid
     local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(last_hid))
     gen_network = nn.gModule({input,noise},{output})
+    --]]
 else
     --Discrim
     local input = nn.Identity()()
@@ -78,10 +74,12 @@ else
 end
 --full
 local input = nn.Identity()()
-local noise = nn.Identity()()
-connect= gen_network{input,noise}
+--local noise = nn.Identity()()
+--connect= gen_network{input,noise}
+connect= gen_network(input)
 local full_out = network{input,connect}
-full_network = nn.gModule({input,noise},{full_out})
+--full_network = nn.gModule({input,noise},{full_out})
+full_network = nn.gModule({input},{full_out})
 
 
 w,dw = full_network:getParameters()
@@ -141,8 +139,8 @@ local train_dis = function()
     data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
 
     local output
-    --action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward(data[{{mb_dim/2+1,-1}}])
-    action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward{data[{{mb_dim/2+1,-1}}],get_noise(mb_dim/2)}
+    action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward(data[{{mb_dim/2+1,-1}}])
+    --action_data[{{mb_dim/2+1,-1}}]  = gen_network:forward{data[{{mb_dim/2+1,-1}}],get_noise(mb_dim/2)}
     output = network:forward{data,action_data}
     last_compare = output
 
@@ -157,17 +155,17 @@ local train_gen = function()
     network:evaluate()
     --network:training()
     data_func(data[{{1,mb_dim}}],action_data[{{1,mb_dim}}])
-    local noise_data = get_noise(mb_dim)
-    local output = full_network:forward{data,noise_data}
+    local output = full_network:forward(data)
     local loss = bce_crit:forward(output,gen_target)
     local grad = bce_crit:backward(output,gen_target)
-    full_network:backward({data,noise_data},grad)
+    full_network:backward(data,grad)
+
     --
     --grad = network:backward({data,gen_network.output},grad)[2]
     loss = loss + bce_crit:forward(gen_network.output,action_data)
     --grad = grad + bce_crit:backward(gen_network.output,action_data)
-    grad = bce_crit:backward(gen_network.output,action_data)
-    gen_network:backward({data,noise_data},grad)
+    --grad = bce_crit:backward(gen_network.output,action_data)
+    --gen_network:backward(data,grad)
     --]]
     return loss,dw
 end
@@ -197,6 +195,15 @@ train = function(x)
         loss = loss + train_dis()
     end
     return loss,dw
+end
+--return yes/no and value for storage
+get_knownness = function(output,ind)
+    local chance_unknown = (1 - H(output[ind][1]))^(1/temp)
+    --nan check
+    if chance_unknown ~= chance_unknown then
+        chance_unknown = 1
+    end
+    return chance_unknown > torch.rand(1)[1], chance_unknown
 end
 
 config = {

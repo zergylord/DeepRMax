@@ -89,6 +89,11 @@ end
 set_data_func = function(func)
     data_func = func
 end
+--return yes/no and value for storage
+get_knownness = function(output,ind)
+    local unknown = output[1][ind][1] < 5e-3
+    return unknown, unknown
+end
 standard = function()
     config = {
         learningRate  = 1e-3

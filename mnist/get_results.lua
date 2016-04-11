@@ -1,8 +1,13 @@
-res = torch.zeros(10)
-for i = 1,10 do
+num_iter = 30
+param = torch.zeros(num_iter)
+score = torch.zeros(num_iter)
+for i = 1,num_iter do
+    temp = torch.rand(1):mul(2)[1]
+    print(temp)
     dofile('combolock.lua')
-    res[i] = final_time
-    print(res)
-    torch.save('results.t7',res)
+    score[i] = final_time
+    param[i] = temp
+    print(final_time,temp)
+    torch.save('results.t7',{param,score})
 end
 

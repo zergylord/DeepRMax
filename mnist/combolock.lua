@@ -10,16 +10,16 @@ torch.setnumthreads(1)
 log2 = function(x) return torch.log(x)/torch.log(2) end
 --H = function(p) return log2(p):cmul(-p)-log2(-p+1):cmul(-p+1) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
-noise_mag = 0--.05
-thresh = .92 --.2 --.04
-temp =  .5
+noise_mag = .05
+--thresh = .92 --.2 --.04
+--temp =  1 --.5
 
 act_dim = 4
 
 
 s = 1
 local timer = torch.Timer()
-use_qnet = true
+--use_qnet = true
 use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
@@ -35,12 +35,12 @@ else
     s_obs = S[s]
 end
 --require 'train_sa_GAN.lua'
---require 'train_policy_GAN.lua'
+require 'train_policy_GAN.lua'
 --require 'train_distinguish.lua'
-require 'train_NCE.lua'
+--require 'train_NCE.lua'
 softmax = nn.SoftMax()
 
-local num_steps = 1e6
+local num_steps = 2e4
 local cumloss =0 
 
 if use_qnet then
@@ -77,7 +77,7 @@ epsilon = .1
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 5e2
+refresh = 1e3
 bonus_hist = torch.zeros(num_steps/refresh)
 C = torch.zeros(mb_dim)
 neg_entropy = torch.zeros(num_state,act_dim)
@@ -228,11 +228,8 @@ for t=1,num_steps do
         else
             possible = {state,action}
         end
-        --C = network:forward(possible):squeeze()
-    
-        --local probs = network:forward(possible)[2]:reshape(act_dim,mb_dim):t()
-        --C = probs:cdiv(probs:sum(2):expandAs(probs)):reshape(mb_dim*act_dim)
-        C = network:forward(possible)[1]:squeeze()
+
+        C = network:forward(possible)
     
         
         target = torch.zeros(mb_dim*act_dim)
@@ -243,24 +240,15 @@ for t=1,num_steps do
             for a = 1,act_dim do
                 local ind = mb_dim*(a-1)+i
                 hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
-                --local chance_unknown = (1 - H(C[ind]))^(1/temp)
                 --local chance_unknown = (1- C[ind])^5
-                local chance_unknown = C[ind] < .001 --.1
+                local unknown, chance_unknown = get_knownness(C,ind)
+                neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
 
-                --nan check
-                if chance_unknown ~= chance_unknown then
-                    chance_unknown = 1
-                end
-                if chance_unknown then
-                    neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + 1
-                end
-                --neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
-                --if  chance_unknown > torch.rand(1)[1] then
-                if  chance_unknown then
+                if  unknown then
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
                         known_flag = false
                     end
-                    local r = 1
+                    local r = .1
                     target[ind] = r
                     target_mask[ind] = 1
                 end
@@ -365,7 +353,7 @@ for t=1,num_steps do
         neg_entropy_over_time_norm[t/refresh] = bonus:div(bonus:max())
         neg_entropy_over_time_per_state_norm[t/refresh] = bonus:mean(2):div(bonus:mean(2):max())
         for i = 1,num_state do
-            neg_entropy_over_time_correct[t/refresh][i] = bonus[i][correct[i] ]
+            neg_entropy_over_time_correct[t/refresh][i] = bonus[i][correct[i] ]/bonus[i]:sum()
             neg_entropy_over_time_incorrect[t/refresh][i] = bonus[i][1]
         end
         gnuplot.raw("set title 'bonus % over time' ")
@@ -377,10 +365,6 @@ for t=1,num_steps do
         gnuplot.raw("set title 'bonus % over time per state normed' ")
         gnuplot.imagesc(neg_entropy_over_time_per_state_norm[{{1,t/refresh}}])
         --[[
-        gnuplot.raw("set title 'bonus % over time for correct action' ")
-        gnuplot.imagesc(neg_entropy_over_time_correct[{{1,t/refresh}}])
-        gnuplot.raw("set title 'bonus % over time for incorrect action' ")
-        gnuplot.imagesc(neg_entropy_over_time_incorrect[{{1,t/refresh}}])
         --]]
         print(visits)
         visits_over_time[t/refresh] = visits
@@ -423,10 +407,10 @@ for t=1,num_steps do
             for a=1,act_dim do
                 local action = torch.rand(iter,act_dim):mul(noise_mag)
                 action[{{},a}] = -torch.rand(iter):mul(noise_mag)+1
-                local out = network:forward{state:cuda(),action:cuda()}[1]:double()
+                local out = network:forward{state:cuda(),action:cuda()}
                 for i=1,iter do
-                    --cur_known[s][a] = cur_known[s][a] + ((1- H(out[i]))^(1/temp)) /iter
-                    cur_known[s][a] = cur_known[s][a] + out[{i,1}] /iter
+                    _,chance_unknown = get_knownness(out,i)
+                    cur_known[s][a] = cur_known[s][a] + chance_unknown /iter
                 end
             end
         end
@@ -442,8 +426,15 @@ for t=1,num_steps do
         gnuplot.raw("set title 'actions' ")
         gnuplot.imagesc(action_data)
         --]]
+        --[[
         gnuplot.raw("set title 'visits over time' ")
         gnuplot.imagesc(visits_over_time[{{1,t/refresh}}]:log1p())
+        --]]
+        gnuplot.raw("set title 'bonus % over time for correct action' ")
+        gnuplot.imagesc(neg_entropy_over_time_correct[{{1,t/refresh}}])
+        --gnuplot.raw("set title 'bonus % over time for incorrect action' ")
+        --gnuplot.imagesc(neg_entropy_over_time_incorrect[{{1,t/refresh}}])
+
         print(action_data[1])
         print(action_data[-1])
         
@@ -451,7 +442,7 @@ for t=1,num_steps do
 
         gnuplot.raw('unset multiplot')
 
-        print(thresh,t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
+        print(t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         gen_count = 0
         timer:reset()
         cumloss = 0
