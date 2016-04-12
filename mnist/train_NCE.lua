@@ -29,8 +29,7 @@ else
     in_dim = num_state or 10
 end
 hid_dim = 1000
-gen_hid_dim = 1000
-dropout = 0 --0.5
+dropout = 0.5
 mb_dim = 320
 out_dim = 1
 fact_dim = 10
@@ -39,6 +38,7 @@ local input = nn.Identity():cuda()()
 local action = nn.Identity():cuda()()
 hid_lin = nn.Linear(in_dim,hid_dim):cuda()
 hid = nn.Dropout(dropout):cuda()(nn.ReLU():cuda()(hid_lin(input)))
+--hid = nn.BatchNormalization(hid_dim):cuda()(nn.ReLU():cuda()(hid_lin(input)))
 local factor = nn.Dropout(dropout):cuda()(nn.CMulTable():cuda(){nn.Linear(hid_dim,fact_dim):cuda()(hid),nn.Linear(act_dim,fact_dim):cuda()(action)})
 local prob = nn.SoftPlus():cuda()(nn.Linear(fact_dim,out_dim):cuda()(factor))
 local denom = nn.AddConstant(.25):cuda()(prob)
@@ -91,8 +91,12 @@ set_data_func = function(func)
 end
 --return yes/no and value for storage
 get_knownness = function(output,ind)
-    local unknown = output[1][ind][1] < 5e-3
-    return unknown, unknown
+    local unknown = output[1][ind][1] < thresh 
+    local chance_unknown = 0
+    if unknown then
+        chance_unknown = 1
+    end
+    return unknown, chance_unknown
 end
 standard = function()
     config = {

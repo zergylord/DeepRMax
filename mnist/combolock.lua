@@ -10,8 +10,8 @@ torch.setnumthreads(1)
 log2 = function(x) return torch.log(x)/torch.log(2) end
 --H = function(p) return log2(p):cmul(-p)-log2(-p+1):cmul(-p+1) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
-noise_mag = .05
---thresh = .92 --.2 --.04
+noise_mag = 0--.05
+thresh = val --5e-3
 --temp =  1 --.5
 
 act_dim = 4
@@ -19,7 +19,7 @@ act_dim = 4
 
 s = 1
 local timer = torch.Timer()
---use_qnet = true
+use_qnet = true
 use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
@@ -35,9 +35,9 @@ else
     s_obs = S[s]
 end
 --require 'train_sa_GAN.lua'
-require 'train_policy_GAN.lua'
+--require 'train_policy_GAN.lua'
 --require 'train_distinguish.lua'
---require 'train_NCE.lua'
+require 'train_NCE.lua'
 softmax = nn.SoftMax()
 
 local num_steps = 2e4
