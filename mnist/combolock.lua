@@ -11,8 +11,8 @@ log2 = function(x) return torch.log(x)/torch.log(2) end
 --H = function(p) return log2(p):cmul(-p)-log2(-p+1):cmul(-p+1) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
 noise_mag = 0--.05
-thresh = val --5e-3
---temp =  1 --.5
+--thresh = val --5e-3
+temp =  val--.5
 
 act_dim = 4
 
@@ -37,10 +37,11 @@ end
 --require 'train_sa_GAN.lua'
 --require 'train_policy_GAN.lua'
 --require 'train_distinguish.lua'
-require 'train_NCE.lua'
+--require 'train_NCE.lua'
+require 'train_VAE_GAN.lua'
 softmax = nn.SoftMax()
 
-local num_steps = 2e4
+local num_steps = 1e5
 local cumloss =0 
 
 if use_qnet then
