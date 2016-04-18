@@ -46,12 +46,14 @@ local out_lin = nn.Linear(fact_dim,out_dim):cuda()
 local output = (nn.Sigmoid():cuda()(out_lin(factor)))
 network = nn.gModule({input,action},{output})
 --encoder
+local input = nn.Identity():cuda()()
 local action = nn.Identity():cuda()()
-local hid = nn.ReLU():cuda()(nn.Linear(act_dim,hid_dim):cuda()(action))
+local hid = nn.CMulTable():cuda(){nn.Linear(in_dim,gen_hid_dim):cuda()(input),nn.Linear(act_dim,gen_hid_dim):cuda()(action)}
+--local hid = nn.ReLU():cuda()(nn.Linear(act_dim,hid_dim):cuda()(action))
 noise_dim = 4
-local mu = nn.Linear(hid_dim,noise_dim):cuda()(hid)
-local sigma = nn.Linear(hid_dim,noise_dim):cuda()(hid)
-encoder = nn.gModule({action},{mu,sigma})
+local mu = nn.Linear(gen_hid_dim,noise_dim):cuda()(hid)
+local sigma = nn.Linear(gen_hid_dim,noise_dim):cuda()(hid)
+encoder = nn.gModule({input,action},{mu,sigma})
 --sampler
 local mu = nn.Identity():cuda()()
 local sigma = nn.Identity():cuda()()
@@ -61,6 +63,7 @@ sampler = nn.gModule({mu,sigma},{sample})
 --Gen / decoder
 local input = nn.Identity():cuda()()
 local noise = nn.Identity():cuda()()
+--local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(in_dim,gen_hid_dim):cuda()(input)))
 local hid = nn.BatchNormalization(gen_hid_dim):cuda()(nn.ReLU():cuda()(nn.CMulTable():cuda(){nn.Linear(in_dim,gen_hid_dim):cuda()(input),nn.Linear(noise_dim,gen_hid_dim):cuda()(noise)}))
 local last_hid = hid
 local output =nn.Sigmoid():cuda()( nn.Linear(gen_hid_dim,act_dim):cuda()(last_hid))
@@ -68,7 +71,7 @@ gen_network = nn.gModule({input,noise},{output})
 --full
 local state = nn.Identity()()
 local action = nn.Identity()()
-connect = gen_network{state,sampler(encoder(action))}
+connect = gen_network{state,sampler(encoder{state,action})}
 local full_out = network{state,connect}
 full_network = nn.gModule({state,action},{full_out})
 
@@ -147,11 +150,13 @@ local train_gen = function()
     --grad = bce_crit:backward(gen_network.output,action_data)
     local sampler_grad = gen_network:backward({data,action_data},grad)[2]
     local enc_grad = sampler:backward(encoder.output,sampler_grad)
+    --[[
     loss = loss + kl_crit:forward(encoder.output)
     kl_grad = kl_crit:backward(encoder.output)
     enc_grad[1] = enc_grad[1] + kl_grad[1]
     enc_grad[2] = enc_grad[2] + kl_grad[2]
-    encoder:backward(action_data,enc_grad)
+    --]]
+    encoder:backward({data,action_data},enc_grad)
     --]]
     return loss,dw
 end

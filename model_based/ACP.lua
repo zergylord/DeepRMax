@@ -14,7 +14,22 @@ action = nn.Identity()()
 factor = nn.ReLU()(nn.Linear(fact_dim,hid_dim)(nn.CMulTable(){nn.Linear(state_dim,fact_dim)(input),nn.Linear(act_dim,fact_dim)(action)}))
 output = nn.Sigmoid()(nn.Linear(hid_dim,state_dim)(factor))
 network = nn.gModule({input,action},{output})
-w,dw = network:getParameters()
+
+--error pred network
+input = nn.Identity()()
+action = nn.Identity()()
+pred = nn.Identity()()
+hid = nn.ReLU()(nn.CAddTable(){nn.Linear(state_dim,hid_dim)(input),nn.Linear(act_dim,hid_dim)(action),nn.Linear(state_dim,hid_dim)(pred)})
+output = nn.Linear(hid_dim,1)(hid)
+err_network = nn.gModule({input,action,pred},{output})
+
+--full network (mainly for gathering params)
+input = nn.Identity()()
+action = nn.Identity()()
+output = err_network{input,action,network{input,action}}
+full_network = nn.gModule({input,action},{output})
+
+w,dw = full_network:getParameters()
 mse_crit = nn.MSECriterion()
 
 --setup MDP
@@ -32,11 +47,16 @@ for a = 1,act_dim do
 end
 
 train = function(x)
-    network:zeroGradParameters()
+    full_network:zeroGradParameters()
     local o = network:forward{D.s,D.a}
     local loss = mse_crit:forward(o,D.sPrime)
     local grad = mse_crit:backward(o,D.sPrime)
     network:backward({D.s,D.a},grad)
+    t_err = torch.pow(o-D.sPrime,2):sum(2)
+    local o_err = err_network:forward{D.s,D.a,o}
+    loss = loss + mse_crit:forward(o_err,t_err)
+    local err_grad =  mse_crit:backward(o_err,t_err)
+    err_network:backward({D.s,D.a,o},err_grad)
     return loss,dw
 end
 
@@ -50,7 +70,12 @@ for i = 1,1e4 do
         gnuplot.figure(1)
         gnuplot.imagesc(network.output)
         gnuplot.figure(2)
-        gnuplot.imagesc(D.sPrime)
+        gnuplot.bar(err_network.output)
+        gnuplot.figure(3)
+        gnuplot.bar(t_err)
+        --gnuplot.imagesc(D.sPrime)
+        sys.sleep(1)
+        
         cumloss = 0
     end
 end
