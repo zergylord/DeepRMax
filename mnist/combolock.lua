@@ -11,7 +11,6 @@ log2 = function(x) return torch.log(x)/torch.log(2) end
 --H = function(p) return log2(p):cmul(-p)-log2(-p+1):cmul(-p+1) end
 H = function(p) return log2(p)*(-p)-log2(-p+1)*(-p+1) end
 noise_mag = 0--.05
-thresh = val or 5e-3
 temp =  1 --.5
 
 act_dim = 4
@@ -19,7 +18,7 @@ act_dim = 4
 
 s = 1
 local timer = torch.Timer()
---use_qnet = true
+use_qnet = true
 --use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
@@ -70,6 +69,7 @@ for i = 1,num_state-1 do
     T[i][action] = i+1
     correct[i] = action
 end
+print(T)
 
 
 
@@ -137,12 +137,17 @@ for t=1,num_steps do
         local vals = q_network:forward(s_obs:view(1,in_dim):cuda())
         _,a = vals:max(2)
         a = a[1]
+        --
         if torch.rand(1)[1] < .1 then
             a[1] = torch.random(act_dim)
         end
+        --]]
     else
         _,a = torch.max(Q[s],1)
         --a = distributions.cat.rnd(1,softmax:forward(Q[s]))
+        if torch.rand(1)[1] < .1 then
+            a[1] = torch.random(act_dim)
+        end
     end
     a = a[1]
 
@@ -226,7 +231,7 @@ for t=1,num_steps do
             Q_clone = Q:clone()
         end
 
-        network:evaluate()
+        --network:evaluate()
         local possible = {state:cuda(),action:cuda()}
 
         C = network:forward(possible)
@@ -306,7 +311,7 @@ for t=1,num_steps do
     s_obs = sPrime_obs:clone() 
     if t % refresh == 0 then
         gnuplot.figure(1)
-        gnuplot.raw("set multiplot layout 2,4 columnsfirst")
+        gnuplot.raw("set multiplot layout 2,5 columnsfirst")
 
 
         if use_qnet then
@@ -394,40 +399,60 @@ for t=1,num_steps do
         --]]
 
         cur_known = torch.zeros(num_state,act_dim)
-        network:evaluate() 
-        local iter = 10
+        cur_pred = torch.zeros(num_state*act_dim,in_dim)
+        cur_actual_pred = torch.zeros(num_state*act_dim,in_dim)
+        cur_err = torch.zeros(num_state,act_dim)
+        cur_actual_err = torch.zeros(num_state,act_dim)
+        --network:evaluate() 
         for s = 1,num_state do
-            local state = torch.zeros(iter,in_dim)
-            for i=1,iter do
-                if use_mnist then
-                    state[i] = digit[s][torch.random(digit[s]:size(1))] 
-                else
-                    state[i] = S[s] 
-                end
+            local state = torch.zeros(1,in_dim)
+            if use_mnist then
+                state[1] = digit[s][torch.random(digit[s]:size(1))] 
+            else
+                state[1] = S[s] 
             end
             for a=1,act_dim do
-                local action = torch.rand(iter,act_dim):mul(noise_mag)
-                action[{{},a}] = -torch.rand(iter):mul(noise_mag)+1
-                local out = network:forward{state:cuda(),action:cuda()}
-                for i=1,iter do
-                    _,chance_unknown = get_knownness(out,i)
-                    cur_known[s][a] = cur_known[s][a] + chance_unknown /iter
+                local sPrime = T[s][a]
+                local statePrime = torch.zeros(in_dim)
+                if use_mnist then
+                    statePrime = digit[sPrime][torch.random(digit[sPrime]:size(1))] 
+                else
+                    statePrime = S[sPrime] 
                 end
+                
+                local action = torch.rand(1,act_dim):mul(noise_mag)
+                action[{{},a}] = -torch.rand(1):mul(noise_mag)+1
+                local out = network:forward{state:cuda(),action:cuda()}
+                _,chance_unknown = get_knownness(out,1)
+                cur_known[s][a] = chance_unknown
+
+                cur_actual_err[s][a] = torch.pow(pred_network.output[1]:double()-statePrime,2):sum()
+                cur_pred[act_dim*(s-1)+a] = pred_network.output[1]:double():clone()
+                cur_actual_pred[act_dim*(s-1)+a] = statePrime:clone()
+                cur_err[s][a] = err_network.output[1][1]
             end
         end
         network:training()
         
-        gnuplot.raw("set title 'current D estimates' ")
-        gnuplot.imagesc(cur_known)
+        --gnuplot.raw("set title 'current D estimates' ")
+        --gnuplot.imagesc(cur_known)
+        gnuplot.raw("set title 'current pred' ")
+        gnuplot.imagesc(cur_pred)
+        gnuplot.raw("set title 'pred diff' ")
+        gnuplot.imagesc(cur_actual_pred - cur_pred)
+        gnuplot.raw("set title 'current pred pred err' ")
+        gnuplot.imagesc(cur_err)
+        gnuplot.raw("set title 'current actual pred err' ")
+        gnuplot.imagesc(cur_actual_err)
         --[[
-        gnuplot.raw("set title 'total visits' ")
+        gnuplot.raw("set title 'visits' ")
         gnuplot.imagesc(sa_visits:log1p())
         --]]
         --[[
         gnuplot.raw("set title 'actions' ")
         gnuplot.imagesc(action_data)
         --]]
-        --
+        --[[
         gnuplot.raw("set title 'visits over time' ")
         gnuplot.imagesc(visits_over_time[{{1,t/refresh}}]:log1p())
         --]]
@@ -443,7 +468,7 @@ for t=1,num_steps do
 
         gnuplot.raw('unset multiplot')
 
-        print(t,cumloss,w:norm(),dw:norm(),timer:time().real)
+        print(t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         gen_count = 0
         timer:reset()
         cumloss = 0
@@ -453,6 +478,7 @@ for t=1,num_steps do
         end
         net_reward = 0
         visits:zero()
+        sa_visits:zero()
         hist_total:zero()
         neg_entropy:zero()
         collectgarbage()
