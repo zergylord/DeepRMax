@@ -46,16 +46,28 @@ local cumloss =0
 
 if use_qnet then
     local hid_dim = 100
-    local input = nn.Identity():cuda()()
-    --local hid = nn.BatchNormalization(hid_dim):cuda()(nn.ReLU():cuda()(nn.Linear(in_dim,hid_dim):cuda()(input)))
-    local hid = nn.ReLU():cuda()(nn.Linear(in_dim,hid_dim):cuda()(input))
-    local output =nn.Linear(hid_dim,act_dim):cuda()(hid)
+    local input = nn.Identity()()
+    local hid = nn.ReLU()(nn.Linear(in_dim,hid_dim)(input))
+    local output =nn.Linear(hid_dim,act_dim)(hid)
     q_network = nn.gModule({input},{output})
+    q_network = q_network:cuda()
     q_w,q_dw = q_network:getParameters()
     q_config = {
         learningRate  = 1e-3
         }
-        mse_crit = nn.MSECriterion():cuda()
+    if use_target_network then
+        --target network
+        local input = nn.Identity()()
+        local hid = nn.ReLU()(nn.Linear(in_dim,hid_dim)(input))
+        local output =nn.Linear(hid_dim,act_dim)(hid)
+        target_network = nn.gModule({input},{output})
+        target_network = target_network:cuda()
+        target_w,target_dw = target_network:getParameters()
+        target_w:copy(q_w)
+
+        target_refresh = 1e3
+    end
+    mse_crit = nn.MSECriterion():cuda()
 end
 
 
@@ -226,7 +238,11 @@ for t=1,num_steps do
         --state = D.obs[mask:expandAs(D.obs)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
         --statePrime = D.obsPrime[mask:expandAs(D.obsPrime)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
         if use_qnet then
-            qPrime,qind = q_network:forward(statePrime:cuda()):max(2)
+            if use_target_network then
+                qPrime,qind = target_network:forward(statePrime:cuda()):max(2)
+            else
+                qPrime,qind = q_network:forward(statePrime:cuda()):max(2)
+            end
         else
             Q_clone = Q:clone()
         end
@@ -296,6 +312,10 @@ for t=1,num_steps do
             return loss,q_dw
             end
             _,batchloss = optim.adam(q_train,q_w,q_config)
+            if t % target_refresh == 0  and use_target_network then
+                target_w:copy(q_w)
+            end
+
         else
             for i=1,mb_dim do
                 for a=1,act_dim do
