@@ -1,5 +1,6 @@
 use_gpu = true
 act_dim = 4
+thresh = 5e-3
 if use_gpu then
     require 'cunn'
 end

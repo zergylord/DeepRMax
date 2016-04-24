@@ -28,37 +28,38 @@ else
 end
 thresh = 1.1 --in_dim/20
 act_dim = 4
-fact_dim = 1000
-hid_dim = 1000
+fact_dim = 20
+pred_hid_dim = 100
+err_hid_dim = 100
 mb_dim = 320 --320
-config = {learningRate = 1e-3}
+config = {learningRate = 2e-4, beta1=.5}
 dropout = .5
 
 --setup pred_network
 input = nn.Identity()()
 action = nn.Identity()()
---factor = (nn.ReLU()(nn.Linear(fact_dim,hid_dim)(nn.CMulTable(){nn.Linear(in_dim,fact_dim)(input),nn.Linear(act_dim,fact_dim)(action)})))
-factor = (((nn.CMulTable(){nn.Linear(in_dim,fact_dim)(input),nn.Linear(act_dim,fact_dim)(action)})))
-output = nn.Sigmoid()(nn.Linear(hid_dim,in_dim)(factor))
+--factor = nn.BatchNormalization(pred_hid_dim)(((nn.CMulTable(){nn.Linear(in_dim,pred_hid_dim)(input),nn.Linear(act_dim,pred_hid_dim)(action)})))
+hid1 = nn.BatchNormalization(pred_hid_dim)((nn.ReLU()(nn.CAddTable(){nn.Linear(in_dim,pred_hid_dim,false)(input),nn.Linear(act_dim,pred_hid_dim,false)(action)})))
+hid2 = nn.BatchNormalization(pred_hid_dim)(nn.ReLU()(nn.Linear(pred_hid_dim,pred_hid_dim,false)(hid1)))
+last_hid = hid2
+output = nn.Sigmoid()(nn.Linear(pred_hid_dim,in_dim,false)(last_hid))
 pred_network = nn.gModule({input,action},{output})
 pred_network = pred_network:cuda()
 --error pred network
 input = nn.Identity()()
 action = nn.Identity()()
 pred = nn.Identity()()
-hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(in_dim,hid_dim)(input),nn.Linear(act_dim,hid_dim)(action),nn.Linear(in_dim,hid_dim)(pred)}))
+--hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(in_dim,err_hid_dim)(input),nn.Linear(act_dim,err_hid_dim)(action),nn.Linear(in_dim,err_hid_dim)(pred)}))
+hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(in_dim,err_hid_dim)(input),nn.Linear(act_dim,err_hid_dim,false)(action),nn.Linear(in_dim,err_hid_dim,false)(pred)}))
+--hid = nn.LeakyReLU(.2)(nn.CAddTable(){nn.Linear(in_dim,err_hid_dim)(input),nn.Linear(act_dim,err_hid_dim,false)(action),nn.Linear(in_dim,err_hid_dim,false)(pred)})
 --[[ fancy doubly factored net
 factorSA = nn.CMulTable(){nn.Linear(in_dim,fact_dim)(input),nn.Linear(act_dim,fact_dim)(action)}
-int_hid1 = nn.ReLU()(nn.Linear(fact_dim,hid_dim)(factorSA))
-factor = nn.CMulTable(){nn.Linear(hid_dim,fact_dim)(int_hid1),nn.Linear(in_dim,fact_dim)(pred)}
-hid = nn.ReLU()(nn.Linear(fact_dim,hid_dim)(factor))
+int_hid1 = nn.ReLU()(nn.Linear(fact_dim,err_hid_dim)(factorSA))
+factor = nn.CMulTable(){nn.Linear(err_hid_dim,fact_dim)(int_hid1),nn.Linear(in_dim,fact_dim)(pred)}
+hid = nn.ReLU()(nn.Linear(fact_dim,err_hid_dim)(factor))
 
 --]]
-if condition == 3 then
-    output = nn.Sigmoid()(nn.Linear(hid_dim,1)(hid))
-else
-    output = (nn.Linear(hid_dim,1)(hid))
-end
+output = nn.Sigmoid()(nn.Linear(err_hid_dim,1)(hid))
 err_network = nn.gModule({input,action,pred},{output})
 err_network = err_network:cuda()
 
@@ -89,43 +90,52 @@ end
 --single training step
 --assumes get_data has been set to a minibatch generating function
 --]]
+local gen_t = torch.ones(mb_dim,1):cuda()
+local dis_t = torch.ones(mb_dim,1):cuda()
+dis_t[{{mb_dim/2+1,-1}}] = 0
+local flip_t = torch.zeros(mb_dim,1):cuda()
 train = function(x)
     network:zeroGradParameters()
+    -----------------------train generator-------------------------
+    local loss
+    err_network:evaluate()
     data_func(data,action_data,dataPrime)
-    local o = pred_network:forward{data,action_data}
-    local loss = mse_crit:forward(o,dataPrime)
-    local grad = mse_crit:backward(o,dataPrime)
+    local o = network:forward{data,action_data}
+    loss = bce_crit:forward(o,gen_t)
+    -- backprop through dis
+    local err_grad = bce_crit:backward(o,gen_t):clone()
+    local _,_,pred_grad = unpack(err_network:backward({data,action_data,pred_network.output},err_grad))
+    pred_grad = pred_grad:clone()
+    --[[ flipped grad
+    loss = loss + bce_crit:forward(o,flip_t)
+    local pre_flip_grad =  bce_crit:backward(o,flip_t):clone()
+    local _,_,flip_grad = unpack(err_network:backward({data,action_data,pred_network.output},pre_flip_grad))
+    pred_grad = (pred_grad - flip_grad)/2
+    --]]
+    pred_network:backward({data,action_data},pred_grad)
+    --]]
+    --[[ supervised term to speed gen learning
+    loss = loss + bce_crit:forward(pred_network.output,dataPrime)
+    local grad = bce_crit:backward(pred_network.output,dataPrime)
     pred_network:backward({data,action_data},grad)
-    t_err = torch.pow(o-dataPrime,2):sum(2)
-    local o_err = err_network:forward{data,action_data,o}
-    local err_grad
-    if condition == 3 then
-        t_err = t_err:gt(thresh)
-        loss = loss + bce_crit:forward(o_err,t_err)
-        err_grad =  bce_crit:backward(o_err,t_err)
-    else
-        loss = loss + mse_crit:forward(o_err,t_err)
-        err_grad =  mse_crit:backward(o_err,t_err)
-    end
-    err_network:backward({data,action_data,o},err_grad)
+    --]]
+    
+    err_network:zeroGradParameters() --dont want to actually change the Discrim weights!
+    err_network:training()
+    ---------------------train descriminator----------------------
+    data_func(data,action_data,dataPrime)
+    dataPrime[{{mb_dim/2+1,-1}}] = pred_network:forward{data[{{mb_dim/2+1,-1}}],action_data[{{mb_dim/2+1,-1}}]}
+    --dataPrime[{{mb_dim/2+1,-1}}] = pred_network.output[{{mb_dim/2+1,-1}}]:clone()
+    local o = err_network:forward{data,action_data,dataPrime}
+    loss = loss + bce_crit:forward(o,dis_t)
+    local grad = bce_crit:backward(o,dis_t)
+    err_network:backward({data,action_data,dataPrime},grad)
     return loss,dw
 end
 --return yes/no and value for storage
-if condition == 1 then
-    get_knownness = function(output,ind)
-        local chance_unknown = output[ind][1]
-        return chance_unknown > torch.rand(1)[1]*(thresh/10), math.min(1,math.max(0,chance_unknown/(thresh/10)))
-    end
-elseif condition == 2 then
-    get_knownness = function(output,ind)
-        local chance_unknown = output[ind][1]
-        return chance_unknown > thresh, math.min(1,math.max(0,chance_unknown/thresh))
-    end
-elseif condition == 3 then
-    get_knownness = function(output,ind)
-        local chance_unknown = output[ind][1]
-        return chance_unknown > torch.rand(1)[1], chance_unknown
-    end
+get_knownness = function(output,ind)
+    local chance_unknown = 1 - output[ind][1]
+    return chance_unknown > torch.rand(1)[1], chance_unknown
 end
 standard = function()
     num_state = 30
@@ -140,9 +150,6 @@ standard = function()
         T[i][action] = i+1
         correct[i] = action
     end
-    config = {
-        learningRate  = 1e-3
-        }
     all_statePrime = torch.zeros(num_state*act_dim,in_dim)
     all_state = torch.zeros(num_state*act_dim,in_dim)
     all_action = torch.zeros(num_state*act_dim,act_dim)
@@ -154,6 +161,7 @@ standard = function()
         end
     end
     weighting = torch.linspace(1,num_state,num_state):pow(-2)
+    --weighting = torch.ones(num_state)
     pred_err = torch.ones(act_dim*num_state)
     local get_data = function(data,action_data,dataPrime)
         local num = data:size(1)
@@ -185,12 +193,17 @@ standard = function()
     set_data_func(get_data)
     for i = 1,1e6 do
         optim.adam(train,w,config)
-        if i % 1e3==0 then
+        if i % 5e2==0 then
             network:forward{all_state:cuda(),all_action:cuda()}
-            pred_err[{{}}] = network.output:double()
-            gnuplot.imagesc(all_statePrime-pred_network.output:double())
+            pred_err = network.output:double():cat(err_network:forward{all_state:cuda(),all_action:cuda(),all_statePrime:cuda()}:double(),1)
+
+            gnuplot.figure(1)
+            gnuplot.imagesc(pred_network.output:double())
+            gnuplot.figure(2)
+            gnuplot.bar(pred_err)
+            gnuplot.axis{'','',0,1}
             local worst =torch.max(all_statePrime-pred_network.output:double())
-            print(i,worst)
+            print(i,w:norm(),dw:norm())
             if worst < .5 then
                 return
             end

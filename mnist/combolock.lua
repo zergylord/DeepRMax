@@ -4,6 +4,7 @@ require 'distributions'
 require 'gnuplot'
 require 'hdf5'
 require 'cunn'
+require 'BCE'
 --torch.manualSeed(123)
 --cutorch.manualSeed(123)
 torch.setnumthreads(1)
@@ -18,7 +19,7 @@ act_dim = 4
 
 s = 1
 local timer = torch.Timer()
-use_qnet = true
+--use_qnet = true
 --use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
@@ -38,7 +39,8 @@ end
 --require 'train_distinguish.lua'
 --require 'train_NCE.lua'
 --require 'train_VAE_GAN.lua'
-require 'train_pred_err.lua'
+--require 'train_pred_err.lua'
+require 'train_pred_GAN.lua'
 softmax = nn.SoftMax()
 
 local num_steps = 1e5
@@ -446,10 +448,13 @@ for t=1,num_steps do
                 _,chance_unknown = get_knownness(out,1)
                 cur_known[s][a] = chance_unknown
 
-                cur_actual_err[s][a] = torch.pow(pred_network.output[1]:double()-statePrime,2):sum()
+                if pred_network then
+                --cur_actual_err[s][a] = torch.pow(pred_network.output[1]:double()-statePrime,2):sum()
+                cur_actual_err[s][a] = BCE(pred_network.output:double(),statePrime:reshape(1,in_dim))
                 cur_pred[act_dim*(s-1)+a] = pred_network.output[1]:double():clone()
                 cur_actual_pred[act_dim*(s-1)+a] = statePrime:clone()
                 cur_err[s][a] = err_network.output[1][1]
+                end
             end
         end
         network:training()

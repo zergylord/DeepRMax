@@ -1,5 +1,5 @@
 require 'gnuplot'
-num_state = 10
+num_state = 30
 Q = torch.zeros(num_state,4)
 T = torch.ones(num_state,4)
 correct = torch.ones(num_state)

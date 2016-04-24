@@ -3,6 +3,7 @@ require 'cunn'
 require 'optim'
 require 'distributions'
 require 'gnuplot'
+require 'BCE'
 --conditions:
 --1 -> stochastic cutoff
 --2 -> deterministic cutoff
@@ -26,7 +27,7 @@ if use_mnist then
 else
     in_dim = num_state or 30
 end
-thresh = 1.1 --in_dim/20
+thresh = .3 --1.1 --in_dim/20
 act_dim = 4
 fact_dim = 1000
 hid_dim = 1000
@@ -93,10 +94,11 @@ train = function(x)
     network:zeroGradParameters()
     data_func(data,action_data,dataPrime)
     local o = pred_network:forward{data,action_data}
-    local loss = mse_crit:forward(o,dataPrime)
-    local grad = mse_crit:backward(o,dataPrime)
+    local loss = bce_crit:forward(o,dataPrime)
+    local grad = bce_crit:backward(o,dataPrime)
     pred_network:backward({data,action_data},grad)
-    t_err = torch.pow(o-dataPrime,2):sum(2)
+    --t_err = torch.pow(o-dataPrime,2):sum(2)
+    t_err = BCE(o,dataPrime)
     local o_err = err_network:forward{data,action_data,o}
     local err_grad
     if condition == 3 then
