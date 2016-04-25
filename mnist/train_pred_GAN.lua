@@ -31,7 +31,7 @@ act_dim = 4
 fact_dim = 20
 pred_hid_dim = 100
 err_hid_dim = 100
-mb_dim = 320 --320
+mb_dim = 320
 config = {learningRate = 2e-4, beta1=.5}
 dropout = .5
 
@@ -98,7 +98,7 @@ train = function(x)
     network:zeroGradParameters()
     -----------------------train generator-------------------------
     local loss
-    err_network:evaluate()
+    --err_network:evaluate()
     data_func(data,action_data,dataPrime)
     local o = network:forward{data,action_data}
     loss = bce_crit:forward(o,gen_t)
@@ -106,7 +106,7 @@ train = function(x)
     local err_grad = bce_crit:backward(o,gen_t):clone()
     local _,_,pred_grad = unpack(err_network:backward({data,action_data,pred_network.output},err_grad))
     pred_grad = pred_grad:clone()
-    --[[ flipped grad
+    -- flipped grad
     loss = loss + bce_crit:forward(o,flip_t)
     local pre_flip_grad =  bce_crit:backward(o,flip_t):clone()
     local _,_,flip_grad = unpack(err_network:backward({data,action_data,pred_network.output},pre_flip_grad))
@@ -114,7 +114,7 @@ train = function(x)
     --]]
     pred_network:backward({data,action_data},pred_grad)
     --]]
-    --[[ supervised term to speed gen learning
+    -- supervised term to speed gen learning
     loss = loss + bce_crit:forward(pred_network.output,dataPrime)
     local grad = bce_crit:backward(pred_network.output,dataPrime)
     pred_network:backward({data,action_data},grad)
@@ -133,9 +133,10 @@ train = function(x)
     return loss,dw
 end
 --return yes/no and value for storage
+thresh = .6
 get_knownness = function(output,ind)
     local chance_unknown = 1 - output[ind][1]
-    return chance_unknown > torch.rand(1)[1], chance_unknown
+    return chance_unknown > thresh, math.max(0,chance_unknown - thresh)
 end
 standard = function()
     num_state = 30
@@ -160,8 +161,9 @@ standard = function()
             all_statePrime[act_dim*(s-1)+a] = S[T[s][a]]
         end
     end
-    weighting = torch.linspace(1,num_state,num_state):pow(-2)
-    --weighting = torch.ones(num_state)
+    --weighting = torch.linspace(1,num_state,num_state):pow(-2)
+    weighting = torch.ones(num_state)
+    --weighting = torch.linspace(1,num_state,num_state):mul(-1.5):exp()
     pred_err = torch.ones(act_dim*num_state)
     local get_data = function(data,action_data,dataPrime)
         local num = data:size(1)
