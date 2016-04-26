@@ -134,9 +134,12 @@ train = function(x)
 end
 --return yes/no and value for storage
 thresh = .6
+steep = 100
+soft_thresh = function(x) return torch.pow(torch.exp(-(x-thresh)*steep)+1,-1) end
 get_knownness = function(output,ind)
-    local chance_unknown = 1 - output[ind][1]
-    return chance_unknown > thresh, math.max(0,chance_unknown - thresh)
+    local chance_unknown = soft_thresh(1 - output[ind][1])
+    --return chance_unknown > thresh, math.max(0,chance_unknown - thresh)
+    return chance_unknown > torch.rand(1)[1], chance_unknown
 end
 standard = function()
     num_state = 30
@@ -162,8 +165,8 @@ standard = function()
         end
     end
     --weighting = torch.linspace(1,num_state,num_state):pow(-2)
-    weighting = torch.ones(num_state)
-    --weighting = torch.linspace(1,num_state,num_state):mul(-1.5):exp()
+    --weighting = torch.ones(num_state)
+    weighting = torch.linspace(1,num_state,num_state):mul(-1.5):exp()
     pred_err = torch.ones(act_dim*num_state)
     local get_data = function(data,action_data,dataPrime)
         local num = data:size(1)
@@ -197,6 +200,7 @@ standard = function()
         optim.adam(train,w,config)
         if i % 5e2==0 then
             network:forward{all_state:cuda(),all_action:cuda()}
+            local chance_unknown = soft_thresh(-network.output:double()+1)
             pred_err = network.output:double():cat(err_network:forward{all_state:cuda(),all_action:cuda(),all_statePrime:cuda()}:double(),1)
 
             gnuplot.figure(1)
@@ -212,4 +216,4 @@ standard = function()
         end
     end
 end
---standard()
+standard()
