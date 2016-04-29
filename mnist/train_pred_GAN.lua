@@ -114,7 +114,7 @@ train = function(x)
     --]]
     pred_network:backward({data,action_data},pred_grad)
     --]]
-    -- supervised term to speed gen learning
+    --[[ supervised term to speed gen learning
     loss = loss + bce_crit:forward(pred_network.output,dataPrime)
     local grad = bce_crit:backward(pred_network.output,dataPrime)
     pred_network:backward({data,action_data},grad)
@@ -137,9 +137,13 @@ thresh = .6
 steep = 100
 soft_thresh = function(x) return torch.pow(torch.exp(-(x-thresh)*steep)+1,-1) end
 get_knownness = function(output,ind)
-    local chance_unknown = soft_thresh(1 - output[ind][1])
-    --return chance_unknown > thresh, math.max(0,chance_unknown - thresh)
-    return chance_unknown > torch.rand(1)[1], chance_unknown
+    if ind then
+        local chance_unknown = soft_thresh(1 - output[ind][1])
+        --return chance_unknown > thresh, math.max(0,chance_unknown - thresh)
+        return chance_unknown > torch.rand(1)[1], chance_unknown
+    else
+        return soft_thresh(-output+1)
+    end
 end
 standard = function()
     num_state = 30
@@ -165,8 +169,8 @@ standard = function()
         end
     end
     --weighting = torch.linspace(1,num_state,num_state):pow(-2)
-    --weighting = torch.ones(num_state)
-    weighting = torch.linspace(1,num_state,num_state):mul(-1.5):exp()
+    weighting = torch.ones(num_state)
+    --weighting = torch.linspace(1,num_state,num_state):mul(-1.5):exp()
     pred_err = torch.ones(act_dim*num_state)
     local get_data = function(data,action_data,dataPrime)
         local num = data:size(1)
@@ -199,6 +203,7 @@ standard = function()
     for i = 1,1e6 do
         optim.adam(train,w,config)
         if i % 5e2==0 then
+            --w = torch.load('w.t7')
             network:forward{all_state:cuda(),all_action:cuda()}
             local chance_unknown = soft_thresh(-network.output:double()+1)
             pred_err = network.output:double():cat(err_network:forward{all_state:cuda(),all_action:cuda(),all_statePrime:cuda()}:double(),1)
@@ -216,4 +221,5 @@ standard = function()
         end
     end
 end
-standard()
+--standard()
+

@@ -19,28 +19,48 @@ act_dim = 4
 
 s = 1
 local timer = torch.Timer()
---use_qnet = true
+rmax = .1
+use_qnet = true
+--use_egreedy = true
+use_target_network = true
 --use_mnist = true
 A = torch.eye(act_dim)
 --A = torch.tril(torch.ones(act_dim,act_dim))
+num_state = 30
+T = torch.ones(num_state,act_dim)
+correct = torch.ones(num_state)
+for i = 1,num_state-1 do
+    action = torch.random(act_dim)
+    T[i][action] = i+1
+    correct[i] = action
+end
 if use_mnist then
-    num_state = 10
     digit = torch.load('digit.t7')
     s_obs = digit[s][torch.random(digit[s]:size(1))]
 else
-    num_state = 30
     --setup MDP
     S = torch.eye(num_state)
     --S = torch.tril(torch.ones(num_state,num_state))
     s_obs = S[s]
+
+    all_statePrime = torch.zeros(num_state*act_dim,num_state)
+    all_state = torch.zeros(num_state*act_dim,num_state)
+    all_action = torch.zeros(num_state*act_dim,act_dim)
+    for s=1,num_state do
+        for a=1,act_dim do
+            all_state[act_dim*(s-1)+a] = S[s]
+            all_action[act_dim*(s-1)+a] = A[a]
+            all_statePrime[act_dim*(s-1)+a] = S[T[s][a]]
+        end
+    end
 end
 --require 'train_sa_GAN.lua'
 --require 'train_policy_GAN.lua'
 --require 'train_distinguish.lua'
 --require 'train_NCE.lua'
 --require 'train_VAE_GAN.lua'
---require 'train_pred_err.lua'
-require 'train_pred_GAN.lua'
+require 'train_pred_err.lua'
+--require 'train_pred_GAN.lua'
 softmax = nn.SoftMax()
 
 local num_steps = 1e5
@@ -76,13 +96,6 @@ end
 
 Q = torch.zeros(num_state,act_dim)
 --Q = torch.rand(num_state,act_dim):mul(-1)
-T = torch.ones(num_state,act_dim)
-correct = torch.ones(num_state)
-for i = 1,num_state-1 do
-    action = torch.random(act_dim)
-    T[i][action] = i+1
-    correct[i] = action
-end
 print(T)
 
 
@@ -151,16 +164,18 @@ for t=1,num_steps do
         local vals = q_network:forward(s_obs:view(1,in_dim):cuda())
         _,a = vals:max(2)
         a = a[1]
-        --
-        if torch.rand(1)[1] < .1 then
-            a[1] = torch.random(act_dim)
+        if use_egreedy then
+            if torch.rand(1)[1] < .1 then
+                a[1] = torch.random(act_dim)
+            end
         end
-        --]]
     else
         _,a = torch.max(Q[s],1)
         --a = distributions.cat.rnd(1,softmax:forward(Q[s]))
-        if torch.rand(1)[1] < .1 then
-            a[1] = torch.random(act_dim)
+        if use_egreedy then
+            if torch.rand(1)[1] < .1 then
+                a[1] = torch.random(act_dim)
+            end
         end
     end
     a = a[1]
@@ -272,7 +287,7 @@ for t=1,num_steps do
                     if a == a_actual[i] then--D.a[mb_ind[i] ] then
                         known_flag = false
                     end
-                    local r = .1
+                    local r = rmax
                     target[ind] = r
                     target_mask[ind] = 1
                 end
@@ -314,7 +329,7 @@ for t=1,num_steps do
             return loss,q_dw
             end
             _,batchloss = optim.adam(q_train,q_w,q_config)
-            if t % target_refresh == 0  and use_target_network then
+            if use_target_network and t % target_refresh == 0 then
                 target_w:copy(q_w)
             end
 
@@ -425,7 +440,7 @@ for t=1,num_steps do
         cur_actual_pred = torch.zeros(num_state*act_dim,in_dim)
         cur_err = torch.zeros(num_state,act_dim)
         cur_actual_err = torch.zeros(num_state,act_dim)
-        --network:evaluate() 
+        --[[network:evaluate() 
         for s = 1,num_state do
             local state = torch.zeros(1,in_dim)
             if use_mnist then
@@ -458,6 +473,13 @@ for t=1,num_steps do
             end
         end
         network:training()
+        --]]
+
+        network:forward{all_state:cuda(),all_action:cuda()}
+        cur_pred = pred_network.output:double()
+        cur_actual_pred = all_statePrime
+        cur_err = get_knownness(err_network.output):reshape(num_state,act_dim)
+        cur_actual_err = BCE(cur_pred,cur_actual_pred):reshape(num_state,act_dim)
         
         --gnuplot.raw("set title 'current D estimates' ")
         --gnuplot.imagesc(cur_known)
@@ -488,6 +510,7 @@ for t=1,num_steps do
 
         print(action_data[1])
         print(action_data[-1])
+        torch.save('w.t7',w)
         
 
 

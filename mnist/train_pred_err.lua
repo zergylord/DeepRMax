@@ -47,7 +47,7 @@ pred_network = pred_network:cuda()
 input = nn.Identity()()
 action = nn.Identity()()
 pred = nn.Identity()()
-hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(in_dim,hid_dim)(input),nn.Linear(act_dim,hid_dim)(action),nn.Linear(in_dim,hid_dim)(pred)}))
+hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(in_dim,hid_dim,false)(input),nn.Linear(act_dim,hid_dim,false)(action),nn.Linear(in_dim,hid_dim)(pred)}))
 --[[ fancy doubly factored net
 factorSA = nn.CMulTable(){nn.Linear(in_dim,fact_dim)(input),nn.Linear(act_dim,fact_dim)(action)}
 int_hid1 = nn.ReLU()(nn.Linear(fact_dim,hid_dim)(factorSA))
@@ -56,9 +56,9 @@ hid = nn.ReLU()(nn.Linear(fact_dim,hid_dim)(factor))
 
 --]]
 if condition == 3 then
-    output = nn.Sigmoid()(nn.Linear(hid_dim,1)(hid))
+    output = nn.Sigmoid()(nn.Linear(hid_dim,1,false)(hid))
 else
-    output = (nn.Linear(hid_dim,1)(hid))
+    output = (nn.Linear(hid_dim,1,false)(hid))
 end
 err_network = nn.gModule({input,action,pred},{output})
 err_network = err_network:cuda()
@@ -115,18 +115,31 @@ end
 --return yes/no and value for storage
 if condition == 1 then
     get_knownness = function(output,ind)
-        local chance_unknown = output[ind][1]
-        return chance_unknown > torch.rand(1)[1]*(thresh/10), math.min(1,math.max(0,chance_unknown/(thresh/10)))
+        if ind then
+            local chance_unknown = output[ind][1]
+            return chance_unknown > torch.rand(1)[1]*(thresh/10), math.min(1,math.max(0,chance_unknown/(thresh/10)))
+        else
+            return output/(thresh/10)
+        end
+        
     end
 elseif condition == 2 then
     get_knownness = function(output,ind)
-        local chance_unknown = output[ind][1]
-        return chance_unknown > thresh, math.min(1,math.max(0,chance_unknown/thresh))
+        if ind then
+            local chance_unknown = output[ind][1]
+            return chance_unknown > thresh, math.min(1,math.max(0,chance_unknown/thresh))
+        else
+            return output - thresh
+        end
     end
 elseif condition == 3 then
     get_knownness = function(output,ind)
-        local chance_unknown = output[ind][1]
-        return chance_unknown > torch.rand(1)[1], chance_unknown
+        if ind then
+            local chance_unknown = output[ind][1]
+            return chance_unknown > torch.rand(1)[1], chance_unknown
+        else
+            return output
+        end
     end
 end
 standard = function()
