@@ -9,6 +9,7 @@ require 'BCE'
 --2 -> deterministic cutoff
 --3 -> predict making cutoff, not err directly
 condition = 1
+setup = function()
 if use_mnist then
     f = hdf5.open('mnist.hdf5')
     mnist_data = f:read():all()
@@ -77,6 +78,7 @@ bce_crit = nn.BCECriterion():cuda()
 data = torch.zeros(mb_dim,in_dim):cuda()
 action_data = torch.zeros(mb_dim,act_dim):cuda()
 dataPrime = torch.zeros(mb_dim,in_dim):cuda()
+end
 --[[
 --Public
 --sets the function called in train_dis to
@@ -143,7 +145,6 @@ elseif condition == 3 then
     end
 end
 standard = function()
-    num_state = 30
     --setup MDP
     S = torch.eye(num_state)
     --S = torch.tril(torch.ones(num_state,num_state))
@@ -155,6 +156,66 @@ standard = function()
         T[i][action] = i+1
         correct[i] = action
     end
+    config = {
+        learningRate  = 1e-3
+        }
+    all_statePrime = torch.zeros(num_state*act_dim,in_dim)
+    all_state = torch.zeros(num_state*act_dim,in_dim)
+    all_action = torch.zeros(num_state*act_dim,act_dim)
+    for s=1,num_state do
+        for a=1,act_dim do
+            all_state[act_dim*(s-1)+a] = S[s]
+            all_action[act_dim*(s-1)+a] = A[a]
+            all_statePrime[act_dim*(s-1)+a] = S[T[s][a]]
+        end
+    end
+    weighting = torch.linspace(1,num_state,num_state):pow(-2)
+    pred_err = torch.ones(act_dim*num_state)
+    local get_data = function(data,action_data,dataPrime)
+        local num = data:size(1)
+        --
+        local sample,s,a
+        sample = torch.multinomial(weighting,num,true)
+        --]]
+        for i =1,num do
+            --[[
+            local sample,s,a
+            local bad_sample = true
+            while bad_sample do
+                sample = torch.multinomial(weighting,1)
+                s = sample[1]
+                a = torch.random(act_dim)
+                bad_sample = pred_err[act_dim*(s-1)+a] < .5
+            end
+            --]]
+            --
+            s = sample[i]
+            a = torch.random(act_dim)
+            --]]
+
+            data[i] = S[s]
+            action_data[i] = A[a]
+            dataPrime[i] = S[T[s][a] ]
+        end
+    end
+    set_data_func(get_data)
+    for i = 1,1e6 do
+        optim.adam(train,w,config)
+        if i % 1e3==0 then
+            network:forward{all_state:cuda(),all_action:cuda()}
+            pred_err[{{}}] = network.output:double()
+            gnuplot.imagesc(all_statePrime-pred_network.output:double())
+            local worst =torch.max(all_statePrime-pred_network.output:double())
+            print(i,worst)
+            if worst < .5 then
+                return
+            end
+        end
+    end
+end
+atari = function()
+    --setup MDP
+    frames,actions = unpack(torch.load(frames.dat))
     config = {
         learningRate  = 1e-3
         }

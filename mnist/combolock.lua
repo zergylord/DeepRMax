@@ -60,6 +60,7 @@ end
 --require 'train_NCE.lua'
 --require 'train_VAE_GAN.lua'
 require 'train_pred_err.lua'
+setup()
 --require 'train_pred_GAN.lua'
 softmax = nn.SoftMax()
 
@@ -256,6 +257,8 @@ for t=1,num_steps do
         --statePrime = D.obsPrime[mask:expandAs(D.obsPrime)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
         if use_qnet then
             if use_target_network then
+                --_,qind = q_network:forward(statePrime:cuda()):max(2)
+                --qPrime = target_network:forward(statePrime:cuda()):gather(2,qind)
                 qPrime,qind = target_network:forward(statePrime:cuda()):max(2)
             else
                 qPrime,qind = q_network:forward(statePrime:cuda()):max(2)
