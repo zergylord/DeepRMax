@@ -8,6 +8,7 @@ require 'gnuplot'
 --2 -> deterministic cutoff
 --3 -> predict making cutoff, not err directly
 condition = 1
+setup = function()
 if use_mnist then
     f = hdf5.open('mnist.hdf5')
     mnist_data = f:read():all()
@@ -26,7 +27,8 @@ if use_mnist then
 else
     in_dim = num_state or 30
 end
-thresh = 1.1 --in_dim/20
+thresh = .55
+steep = 100
 act_dim = 4
 fact_dim = 20
 pred_hid_dim = 100
@@ -77,6 +79,11 @@ bce_crit = nn.BCECriterion():cuda()
 data = torch.zeros(mb_dim,in_dim):cuda()
 action_data = torch.zeros(mb_dim,act_dim):cuda()
 dataPrime = torch.zeros(mb_dim,in_dim):cuda()
+gen_t = torch.ones(mb_dim,1):cuda()
+dis_t = torch.ones(mb_dim,1):cuda()
+dis_t[{{mb_dim/2+1,-1}}] = 0
+flip_t = torch.zeros(mb_dim,1):cuda()
+end
 --[[
 --Public
 --sets the function called in train_dis to
@@ -90,10 +97,6 @@ end
 --single training step
 --assumes get_data has been set to a minibatch generating function
 --]]
-local gen_t = torch.ones(mb_dim,1):cuda()
-local dis_t = torch.ones(mb_dim,1):cuda()
-dis_t[{{mb_dim/2+1,-1}}] = 0
-local flip_t = torch.zeros(mb_dim,1):cuda()
 train = function(x)
     network:zeroGradParameters()
     -----------------------train generator-------------------------
@@ -114,7 +117,7 @@ train = function(x)
     --]]
     pred_network:backward({data,action_data},pred_grad)
     --]]
-    --[[ supervised term to speed gen learning
+    -- supervised term to speed gen learning
     loss = loss + bce_crit:forward(pred_network.output,dataPrime)
     local grad = bce_crit:backward(pred_network.output,dataPrime)
     pred_network:backward({data,action_data},grad)
@@ -133,8 +136,6 @@ train = function(x)
     return loss,dw
 end
 --return yes/no and value for storage
-thresh = .6
-steep = 100
 soft_thresh = function(x) return torch.pow(torch.exp(-(x-thresh)*steep)+1,-1) end
 get_knownness = function(output,ind)
     if ind then

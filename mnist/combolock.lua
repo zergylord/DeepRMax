@@ -20,7 +20,7 @@ act_dim = 4
 s = 1
 local timer = torch.Timer()
 rmax = .1
-use_qnet = true
+--use_qnet = true
 --use_egreedy = true
 use_target_network = true
 --use_mnist = true
@@ -59,9 +59,9 @@ end
 --require 'train_distinguish.lua'
 --require 'train_NCE.lua'
 --require 'train_VAE_GAN.lua'
-require 'train_pred_err.lua'
+--require 'train_pred_err.lua'
+require 'train_pred_GAN.lua'
 setup()
---require 'train_pred_GAN.lua'
 softmax = nn.SoftMax()
 
 local num_steps = 1e5
@@ -257,9 +257,9 @@ for t=1,num_steps do
         --statePrime = D.obsPrime[mask:expandAs(D.obsPrime)]:reshape(mb_dim,in_dim):repeatTensor(act_dim,1)
         if use_qnet then
             if use_target_network then
-                --_,qind = q_network:forward(statePrime:cuda()):max(2)
-                --qPrime = target_network:forward(statePrime:cuda()):gather(2,qind)
-                qPrime,qind = target_network:forward(statePrime:cuda()):max(2)
+                _,qind = q_network:forward(statePrime:cuda()):max(2)
+                qPrime = target_network:forward(statePrime:cuda()):gather(2,qind)
+                --qPrime,qind = target_network:forward(statePrime:cuda()):max(2)
             else
                 qPrime,qind = q_network:forward(statePrime:cuda()):max(2)
             end
