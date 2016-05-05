@@ -51,6 +51,7 @@ end
 local function recordFrames(options)
     local actions = {torch.Tensor({options.action})}
     local env = alewrap.createEnv(options.rom, {enableRamObs=true})
+    local validA = env:actions()
     local firstObservations = env:envStart()
     for i = 1, options.skip do
         local reward
@@ -65,15 +66,17 @@ local function recordFrames(options)
     local firstObs = firstObservations[1]
     local observations = firstObservations
     local frames = torch.ByteTensor(MAX_PERIOD, firstObs:size(1), firstObs:size(2))
+    local actions = torch.Tensor(MAX_PERIOD)
     for step = 1, MAX_PERIOD do
         local obs = observations[1]
         frames[step]:copy(obs)
 
         local reward
-        reward, observations = env:envStep(actions)
-
+        local action =torch.random(validA:size(1)) 
+        reward, observations = env:envStep({torch.Tensor{validA[action]}})
+        actions[step] = action
         if isObsEq(firstObservations, observations) then
-            return frames[{{1, step}}]:clone()
+            return frames[{{1, step}}]:clone(),actions[{{1,step}}]:clone()
         end
     end
 
@@ -83,9 +86,9 @@ end
 
 local function main()
     local options = parseArgs()
-    local frames = recordFrames(options)
+    local frames,actions = recordFrames(options)
     print("period length:", frames:size(1))
-    torch.save(options.output, frames)
+    torch.save(options.output, {frames,actions})
 end
 
 main()
