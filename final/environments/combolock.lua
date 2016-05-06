@@ -1,5 +1,5 @@
 env = {}
-local S,A,T,correct
+local S,A,T,correct,all_state,all_action,all_statePrime
 --[[
 --param table options:
 --actions: number of actions (default 4)
@@ -51,11 +51,16 @@ end
 function env.get_action(a)
     return A[a]
 end
-
+--[[ return all possible states
+--]]
 function env.get_all_states()
     return S
 end
-
+--[[ return all possible s,a,sPrime combinations
+--]]
+function env.get_complete_dataset()
+    return all_state,all_action,all_statePrime
+end
 
 
 

@@ -2,7 +2,7 @@ require 'nngraph'
 require 'optim'
 require 'distributions'
 require 'gnuplot'
-require 'hdf5'
+--require 'hdf5'
 require 'cunn'
 require 'util.BCE'
 --torch.manualSeed(123)
@@ -339,6 +339,7 @@ for t=1,num_steps do
         cur_err = torch.zeros(num_state,act_dim)
         cur_actual_err = torch.zeros(num_state,act_dim)
 
+        local all_state,all_action,all_statePrime = env.get_complete_dataset()
         network:forward{all_state:cuda(),all_action:cuda()}
         cur_pred = pred_network.output:double()
         cur_actual_pred = all_statePrime
