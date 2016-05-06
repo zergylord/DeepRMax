@@ -3,7 +3,7 @@ require 'cunn'
 require 'optim'
 require 'distributions'
 require 'gnuplot'
-require 'BCE'
+require '../util/BCE'
 --conditions:
 --1 -> stochastic cutoff
 --2 -> deterministic cutoff
