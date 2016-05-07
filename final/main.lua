@@ -68,18 +68,6 @@ end
 
 
 
---init viz variables----------------------------------
-bonus_hist = torch.zeros(num_steps/refresh)
-C = torch.zeros(mb_dim)
-neg_entropy = torch.zeros(num_state,act_dim)
-hist_total = torch.zeros(num_state,act_dim)
-visits = torch.zeros(num_state)
-visits_over_time = torch.zeros(num_steps/refresh,num_state)
-neg_entropy_over_time = torch.zeros(num_steps/refresh,num_state*act_dim)
-neg_entropy_over_time_norm = torch.zeros(num_steps/refresh,num_state*act_dim)
-neg_entropy_over_time_per_state = torch.zeros(num_steps/refresh,num_state)
-neg_entropy_over_time_per_state_norm = torch.zeros(num_steps/refresh,num_state)
-sa_visits = torch.zeros(num_state,act_dim)
 
 --setup experience replay------------------------------
 D = {}
@@ -141,8 +129,7 @@ for t=1,num_steps do
     r,sPrime_obs,sPrime = env.step(s,a)
     net_reward = net_reward + r
 
-    sa_visits[s][a] = sa_visits[s][a] + 1
-    visits[sPrime] = visits[sPrime] + 1
+    env.update_step_stats(s,a)
 
     --record history
     D.s[D.i] = s
@@ -207,9 +194,8 @@ for t=1,num_steps do
             local known_flag = true
             for a = 1,act_dim do
                 local ind = mb_dim*(a-1)+i
-                hist_total[s[i] ][a] = hist_total[s[i] ][a] + 1
                 local unknown, chance_unknown = get_knownness(C,ind)
-                neg_entropy[s[i] ][a] = neg_entropy[s[i] ][a] + chance_unknown
+                env.update_replay_stats(s,a,chance_unknown)
 
                 if  unknown then
                     if a == a_actual[i] then
@@ -224,7 +210,6 @@ for t=1,num_steps do
             if known_flag then
                 --print('known!')
                 local ind = mb_dim*(a_actual[i]-1)+i
-                hist_total[s[i] ][a_actual[i]] = hist_total[s[i] ][a_actual[i]] + 1
                 target_mask[ind] = 1
                 if s[i] == num_state then
                     target[ind] = r[i]
@@ -276,91 +261,12 @@ for t=1,num_steps do
     s = sPrime
     s_obs = sPrime_obs:clone() 
     if t % refresh == 0 then
-        gnuplot.figure(1)
-        gnuplot.raw("set multiplot layout 2,5 columnsfirst")
+        env.get_info(network,err_network,pred_network,q_network)
 
-
-        if use_qnet then
-            local Q
-            if use_mnist then
-                local data = torch.zeros(num_state,in_dim):cuda()
-                for s = 1,num_state do
-                    data[s] = digit[s][torch.random(digit[s]:size(1))]
-                end
-                Q = q_network:forward(data)
-            else
-                Q = q_network:forward(env.get_all_states():cuda())
-            end
-
-            gnuplot.raw("set title 'Q-values' ")
-            gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
-            gnuplot.raw('set yrange [*:*] noreverse')
-            gnuplot.plot({Q:mean(2)},{Q:max(2):double()},{Q:min(2):double()})
-        else
-            gnuplot.raw("set title 'Q-values' ")
-            gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
-            gnuplot.raw('set yrange [0:1] noreverse')
-            gnuplot.plot({Q:mean(2)},{Q:max(2):double()},{Q:min(2):double()})
-        end
-
-
-        
-        gnuplot.raw("set title '% R-Max bonus over time' ")
-        gnuplot.raw('set xrange [' .. 0 .. ':' .. t/refresh+1 .. '] noreverse')
-        gnuplot.raw('set yrange [0:.1] noreverse')
-        local bonus = neg_entropy:cdiv(hist_total+1)
-        print(bonus:mean())
-        bonus_hist[t/refresh] = bonus:mean()
-        gnuplot.plot(bonus_hist[{{1,t/refresh}}])
-        
-        
-        
-        neg_entropy_over_time[t/refresh] = bonus
-        neg_entropy_over_time_per_state[t/refresh] = bonus:mean(2)
-        neg_entropy_over_time_norm[t/refresh] = bonus:div(bonus:max())
-        neg_entropy_over_time_per_state_norm[t/refresh] = bonus:mean(2):div(bonus:mean(2):max())
-        gnuplot.raw("set title 'bonus % over time' ")
-        gnuplot.imagesc(neg_entropy_over_time[{{1,t/refresh}}])
-        gnuplot.raw("set title 'bonus % over time per state' ")
-        gnuplot.imagesc(neg_entropy_over_time_per_state[{{1,t/refresh}}])
-        gnuplot.raw("set title 'bonus % over time normed' ")
-        gnuplot.imagesc(neg_entropy_over_time_norm[{{1,t/refresh}}])
-        gnuplot.raw("set title 'bonus % over time per state normed' ")
-        gnuplot.imagesc(neg_entropy_over_time_per_state_norm[{{1,t/refresh}}])
-
-        print(visits)
-        visits_over_time[t/refresh] = visits
-
-        cur_known = torch.zeros(num_state,act_dim)
-        cur_pred = torch.zeros(num_state*act_dim,in_dim)
-        cur_actual_pred = torch.zeros(num_state*act_dim,in_dim)
-        cur_err = torch.zeros(num_state,act_dim)
-        cur_actual_err = torch.zeros(num_state,act_dim)
-
-        local all_state,all_action,all_statePrime = env.get_complete_dataset()
-        network:forward{all_state:cuda(),all_action:cuda()}
-        cur_pred = pred_network.output:double()
-        cur_actual_pred = all_statePrime
-        cur_err = get_knownness(err_network.output):reshape(num_state,act_dim)
-        cur_actual_err = BCE(cur_pred,cur_actual_pred):reshape(num_state,act_dim)
-        
-        gnuplot.raw("set title 'current pred' ")
-        gnuplot.imagesc(cur_pred)
-        gnuplot.raw("set title 'pred diff' ")
-        gnuplot.imagesc(cur_actual_pred - cur_pred)
-        gnuplot.raw("set title 'current pred pred err' ")
-        gnuplot.imagesc(cur_err)
-        gnuplot.raw("set title 'current actual pred err' ")
-        gnuplot.imagesc(cur_actual_err)
 
         torch.save('w.t7',w)
-        
-
-
-        gnuplot.raw('unset multiplot')
 
         print(t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
-        gen_count = 0
         timer:reset()
         cumloss = 0
         if net_reward/refresh > ((1/num_state)*(1-epsilon)) then
@@ -368,10 +274,6 @@ for t=1,num_steps do
             break
         end
         net_reward = 0
-        visits:zero()
-        sa_visits:zero()
-        hist_total:zero()
-        neg_entropy:zero()
         collectgarbage()
     end
 
