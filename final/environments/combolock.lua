@@ -42,8 +42,12 @@ end
 --returns observation and exact state
 --]]
 function env.step(s,a)
-    sPrime = T[s][a]
-    return S[sPrime],sPrime
+    local sPrime = T[s][a]
+    local r  = 0
+    if sPrime == num_state then
+        r = 1
+    end
+    return r,S[sPrime],sPrime
 end
 --[[
 --returns one-hot vector for action a

@@ -33,7 +33,7 @@ act_dim = 4
 fact_dim = 2000
 hid_dim = 1000 --1000
 mb_dim = 320 --320
-config = {learningRate = 1e-4}
+config = {learningRate = 1e-3}
 dropout = .5
 
 if use_atari then

@@ -13,10 +13,14 @@ local timer = torch.Timer()
 --set hyper parameters-------------
 rmax = .1
 use_qnet = true
+q_config = {
+    learningRate  = 1e-3
+    }
 --use_egreedy = true
---use_target_network = true
---use_mnist = true
 epsilon = .1
+use_target_network = true
+target_refresh = 1e3
+--use_mnist = true
 alpha = .1
 gamma = .9
 net_reward = 0
@@ -25,7 +29,8 @@ num_steps = 1e5
 
 
 --select environment---------------------------------------------
-require 'environments.combolock'
+--require 'environments.combolock'
+require 'environments.grid'
 env.setup()
 
 --select exploration method------------------------------------
@@ -43,9 +48,6 @@ if use_qnet then
     q_network = nn.gModule({input},{output})
     q_network = q_network:cuda()
     q_w,q_dw = q_network:getParameters()
-    q_config = {
-        learningRate  = 1e-3
-        }
     if use_target_network then
         --target network
         local input = nn.Identity()()
@@ -56,7 +58,6 @@ if use_qnet then
         target_w,target_dw = target_network:getParameters()
         target_w:copy(q_w)
 
-        target_refresh = 1e3
     end
     mse_crit = nn.MSECriterion():cuda()
 else
@@ -137,15 +138,12 @@ for t=1,num_steps do
     a = a[1]
 
     --perform action
-    sPrime_obs,sPrime = env.step(s,a)
+    r,sPrime_obs,sPrime = env.step(s,a)
+    net_reward = net_reward + r
 
     sa_visits[s][a] = sa_visits[s][a] + 1
     visits[sPrime] = visits[sPrime] + 1
 
-    if sPrime == num_state then
-        r = 1
-        net_reward = net_reward + r
-    end
     --record history
     D.s[D.i] = s
     D.a[D.i] = a
