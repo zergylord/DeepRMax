@@ -1,5 +1,5 @@
 env = {}
-local S,A,T,correct,all_state,all_action,all_statePrime
+local S,A,T,correct,all_state,all_action,all_statePrime,num_steps,refresh
 local bonus_hist,bonus,replay_visits,visits
 local visits_over_time,visits_over_time_norm,visits_over_time_per_state,visits_over_time_per_state_norm
 --[[
@@ -11,6 +11,8 @@ function env.setup(params)
     params = params or {}
     act_dim = params.actions or 4
     num_state = params.states or 30
+    num_steps = params.num_steps or 1e6
+    refresh = params.refresh or 1e3
     A = torch.eye(act_dim)
     T = torch.ones(num_state,act_dim)
     correct = torch.ones(num_state)
@@ -89,13 +91,13 @@ end
 --to record relevant statistics (e.g. bonus percentage(
 --]]
 function env.update_replay_stats(s,a,chance_unknown)
-    replay_visits[s[i] ][a] = replay_visits[s[i] ][a] + 1
-    bonus[s[i] ][a] = bonus[s[i] ][a] + chance_unknown
+    replay_visits[s ][a] = replay_visits[s ][a] + 1
+    bonus[s ][a] = bonus[s][a] + chance_unknown
 end
 --[[
 --called every 'refresh' steps, normally to plot data
 --]]
-function env.get_info(network,err_network,pred_network,q_network) 
+function env.get_info(t,network,err_network,pred_network,q_network) 
     gnuplot.figure(1)
     gnuplot.raw("set multiplot layout 2,5 columnsfirst")
 

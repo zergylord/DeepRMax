@@ -29,9 +29,9 @@ num_steps = 1e5
 
 
 --select environment---------------------------------------------
---require 'environments.combolock'
-require 'environments.grid'
-env.setup()
+require 'environments.combolock'
+--require 'environments.grid'
+env.setup{refresh=refresh,num_steps=num_steps}
 
 --select exploration method------------------------------------
 require 'models.PPE'
@@ -195,7 +195,7 @@ for t=1,num_steps do
             for a = 1,act_dim do
                 local ind = mb_dim*(a-1)+i
                 local unknown, chance_unknown = get_knownness(C,ind)
-                env.update_replay_stats(s,a,chance_unknown)
+                env.update_replay_stats(s[i],a,chance_unknown)
 
                 if  unknown then
                     if a == a_actual[i] then
@@ -261,7 +261,7 @@ for t=1,num_steps do
     s = sPrime
     s_obs = sPrime_obs:clone() 
     if t % refresh == 0 then
-        env.get_info(network,err_network,pred_network,q_network)
+        env.get_info(t,network,err_network,pred_network,q_network)
 
 
         torch.save('w.t7',w)
@@ -269,7 +269,7 @@ for t=1,num_steps do
         print(t,net_reward/refresh,cumloss,w:norm(),dw:norm(),timer:time().real)
         timer:reset()
         cumloss = 0
-        if net_reward/refresh > ((1/num_state)*(1-epsilon)) then
+        if net_reward/refresh > ((1/num_state)*(.8)) then
             final_time = t
             break
         end
