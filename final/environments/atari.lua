@@ -3,6 +3,7 @@ local alewrap = require 'alewrap'
 local validA,num_steps,refresh
 require '../Scale'
 local prep = nn.Scale(84,84)
+local H
 --[[
 --param table options:
 --game: which rom (default 'pong')
@@ -22,6 +23,7 @@ function env.setup(params)
     act_dim = #validA
 
     state_dim = 84*84
+    H = torch.zeros(num_hist,84,84):float()
     A = torch.eye(act_dim)
 
     --init viz variables----------------------------------
@@ -32,14 +34,19 @@ end
 --]]
 function env.reset()
     local screen = game:nextRandomGame() --newGame()
-    return prep:forward(screen)
+    H:zero()
+    local obs = prep:forward(screen[1]):cat(H,1)
+    return obs:reshape(obs:numel()) 
 end
 --[[
 --returns observation and exact state
 --]]
 function env.step(s,a)
     local nextScreen,r,term = game:step(validA[a])
-    return r,prep:forward(nextScreen)
+    H[{{2,num_hist}}] = H[{{1,num_hist-1}}]:clone()
+    H[1] = s[{{1,84*84}}]
+    local obs = prep:forward(nextScreen[1]):cat(H,1)
+    return r,obs:reshape(obs:numel())
 end
 --[[
 --returns one-hot vector for action a
@@ -50,7 +57,7 @@ end
 --[[ return all possible states
 --]]
 function env.get_all_states()
-    return S
+    return nil
 end
 --[[ return all possible s,a,sPrime combinations
 --]]
@@ -74,3 +81,8 @@ end
 --]]
 function env.get_info(network,err_network,pred_network,q_network) 
 end
+--[[
+env.setup()
+s = env.reset()
+sPrime = env.step(s,1)
+--]]
