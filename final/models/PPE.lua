@@ -9,38 +9,23 @@ require '../util/BCE'
 --2 -> deterministic cutoff
 --3 -> predict making cutoff, not err directly
 condition = 1
-setup = function()
-if use_mnist then
-    f = hdf5.open('mnist.hdf5')
-    mnist_data = f:read():all()
-    mask = mnist_data.t_train:ne(8):reshape(50000,1):expandAs(mnist_data.x_train)
-    not8 = mnist_data.x_train[mask]
-    in_dim = mnist_data.x_train:size(2)
-    not8 = not8:reshape(not8:size(1)/in_dim,in_dim)
-    notnot8 = mnist_data.x_train[mask:eq(0)]
-    notnot8 = notnot8:reshape(notnot8:size(1)/in_dim,in_dim)
-    act_dict = torch.eye(act_dim):float()
-    if use_gpu then
-        act_dict = act_dict:cuda()
-        notnot8 = notnot8:cuda()
-        not8 = not8:cuda()
-    end
-else
-    in_dim = num_state or 30
-end
+setup = function(env)
+in_dim = env.in_dim
+state_dim = env.image_size:prod()
 thresh = .3 --1.1 --in_dim/20
-act_dim = 4
+act_dim = env.act_dim
 fact_dim = 2000
 hid_dim = 1000 --1000
-mb_dim = 320 --320
+mb_dim = 32 --320
 config = {learningRate = 1e-3}
 dropout = .5
 
-if use_atari then
+if env.spatial then
     --setup pred_network
     input = nn.Identity()()
+    view = nn.View(-1,env.num_hist+1,84,84)(input)
     action = nn.Identity()()
-    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(num_hist+1,64,6,6,2,2)(input))
+    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(env.num_hist+1,64,6,6,2,2)(view))
     conv2 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv1))
     conv3 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv2))
     num_conv = 64*10*10
@@ -55,9 +40,11 @@ if use_atari then
     pred_network = pred_network:cuda()
     --error pred network
     input = nn.Identity()()
+    in_view = nn.View(-1,env.num_hist+1,84,84)(input)
     action = nn.Identity()()
     pred = nn.Identity()()
-    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(num_hist+2,64,6,6,2,2)(nn.JoinTable(2){input,pred}))
+    pred_view = nn.View(-1,1,84,84)(pred)
+    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(env.num_hist+2,64,6,6,2,2)(nn.JoinTable(2){in_view,pred_view}))
     conv2 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv1))
     s_conv = nn.View(num_conv)(nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv2)))
     hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(num_conv,hid_dim,false)(s_conv),nn.Linear(act_dim,hid_dim,false)(action)}))
@@ -114,13 +101,8 @@ network = network:cuda()
 w,dw = network:getParameters()
 mse_crit = nn.MSECriterion():cuda()
 bce_crit = nn.BCECriterion():cuda()
-if use_atari then
-    data = torch.zeros(mb_dim,num_hist+1,torch.sqrt(in_dim),torch.sqrt(in_dim)):cuda()
-    dataPrime = torch.zeros(mb_dim,1,torch.sqrt(in_dim),torch.sqrt(in_dim)):cuda()
-else
-    data = torch.zeros(mb_dim,in_dim):cuda()
-    dataPrime = torch.zeros(mb_dim,in_dim):cuda()
-end
+data = torch.zeros(mb_dim,in_dim):cuda()
+dataPrime = torch.zeros(mb_dim,state_dim):cuda()
 action_data = torch.zeros(mb_dim,act_dim):cuda()
 end
 --[[
@@ -145,7 +127,7 @@ train = function(x)
     pred_network:backward({data,action_data},grad)
     --t_err = torch.pow(o-dataPrime,2):sum(2)
     if o:dim() >2 then
-        t_err = BCE(o:reshape(mb_dim,in_dim),dataPrime:reshape(mb_dim,in_dim))
+        t_err = BCE(o:view(mb_dim,state_dim),dataPrime:view(mb_dim,state_dim))
     else
         t_err = BCE(o,dataPrime)
     end
@@ -301,9 +283,9 @@ atari = function()
         cumloss = cumloss + batchloss[1]
         if i % 1e4==0 then
             gnuplot.figure(1)
-            gnuplot.imagesc(pred_network.output[1]:reshape(84,84))
+            gnuplot.imagesc(pred_network.output[1]:view(84,84))
             gnuplot.figure(2)
-            gnuplot.imagesc(dataPrime[1]:reshape(84,84))
+            gnuplot.imagesc(dataPrime[1]:view(84,84))
             print(i,cumloss,w:norm(),dw:norm())
             cumloss = 0
         end

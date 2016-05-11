@@ -3,7 +3,7 @@ local alewrap = require 'alewrap'
 local validA,num_steps,refresh
 require '../Scale'
 local prep = nn.Scale(84,84)
-local H
+local H,last_obs
 --[[
 --param table options:
 --game: which rom (default 'pong')
@@ -12,20 +12,26 @@ local H
 --]]
 function env.setup(params)
     params = params or {}
-    params.game_path = '../../roms/'
+    params.game_path = '../roms/'
     params.env = params.env or 'pong'
     params.actrep = params.actrep or 3
     num_steps = params.num_steps or 1e6
     refresh = params.refresh or 1e3
-    num_hist = params.num_hist or 3
     game = alewrap.GameEnvironment(params)
     validA = game:getActions()
-    act_dim = #validA
 
-    state_dim = 84*84
-    H = torch.zeros(num_hist,84,84):float()
-    A = torch.eye(act_dim)
 
+    --init visible members
+    env.state_dim = 84*84
+    env.act_dim = #validA
+    env.num_hist = params.num_hist or 3
+    env.image_size = torch.Tensor{84,84}
+    env.in_dim = env.state_dim*(env.num_hist+1)
+    env.byte_storage = true
+    env.spatial = true
+
+    H = torch.zeros(env.num_hist,84,84):float()
+    A = torch.eye(env.act_dim)
     --init viz variables----------------------------------
     bonus_hist = torch.zeros(num_steps/refresh)
 end
@@ -35,18 +41,18 @@ end
 function env.reset()
     local screen = game:nextRandomGame() --newGame()
     H:zero()
-    local obs = prep:forward(screen[1]):cat(H,1)
-    return obs:reshape(obs:numel()) 
+    last_obs = prep:forward(screen[1]):cat(H,1)
+    return last_obs:reshape(env.in_dim),1
 end
 --[[
 --returns observation and exact state
 --]]
-function env.step(s,a)
+function env.step(a)
     local nextScreen,r,term = game:step(validA[a])
-    H[{{2,num_hist}}] = H[{{1,num_hist-1}}]:clone()
-    H[1] = s[{{1,84*84}}]
-    local obs = prep:forward(nextScreen[1]):cat(H,1)
-    return r,obs:reshape(obs:numel())
+    H[{{2,env.num_hist}}] = H[{{1,env.num_hist-1}}]:clone()
+    H[1] = last_obs[1]
+    last_obs = prep:forward(nextScreen[1]):cat(H,1)
+    return r,last_obs:reshape(env.in_dim),1,term
 end
 --[[
 --returns one-hot vector for action a
@@ -54,6 +60,13 @@ end
 function env.get_action(a)
     return A[a]
 end
+--[[
+--get the predictable part of the state
+--]]
+function env.get_pred_state(s)
+    return s[{{1,env.state_dim}}]
+end
+
 --[[ return all possible states
 --]]
 function env.get_all_states()
@@ -80,6 +93,18 @@ end
 --called every 'refresh' steps, normally to plot data
 --]]
 function env.get_info(network,err_network,pred_network,q_network) 
+end
+--[[
+--process state for storage in replay buffer
+--]]
+function env.process_for_storage(s)
+    return s:clone():mul(255):byte()
+end
+--[[ process state for retrieval
+--
+--]]
+function env.process_for_retrieval(s)
+    return s:float():div(255)
 end
 --[[
 env.setup()
