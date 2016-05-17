@@ -10,6 +10,7 @@ require 'util.BCE'
 torch.setnumthreads(1)
 local timer = torch.Timer()
 
+
 --set hyper parameters-------------
 --use_rmax = true
 rmax = .1
@@ -111,9 +112,13 @@ local get_data = function(data,action_data,dataPrime)
 end
 set_data_func(get_data)
 final_time = -1
-state = torch.zeros(mb_dim*env.act_dim,in_dim)
-statePrime = torch.zeros(mb_dim,in_dim)
-aind = torch.LongTensor(mb_dim*env.act_dim,1)
+state = torch.zeros(mb_dim*env.act_dim,in_dim):cuda()
+statePrime = torch.zeros(mb_dim,in_dim):cuda()
+action = torch.zeros(mb_dim*env.act_dim,env.act_dim):cuda()
+target = torch.zeros(mb_dim*env.act_dim):cuda()
+target_mask = torch.zeros(mb_dim*env.act_dim,1):byte()
+act_grad = torch.zeros(env.act_dim*mb_dim,env.act_dim):cuda()
+aind = torch.LongTensor(mb_dim*env.act_dim,1):cuda()
 for a=1,env.act_dim do
     for i=1,mb_dim do
         aind[mb_dim*(a-1)+i] = a
@@ -175,7 +180,7 @@ for t=1,num_steps do
         --gotta re-perm if runnning train_dis multiple times
         mb_ind = torch.randperm(math.min(t,D.size))
         local mask = torch.zeros(D.size,1):byte()
-        local action = torch.zeros(mb_dim*env.act_dim,env.act_dim)
+        action:zero()
         for i =1,mb_dim do
             mask[mb_ind[i] ] = 1
             for a = 1,env.act_dim  do
@@ -189,7 +194,7 @@ for t=1,num_steps do
             cumloss = cumloss + batchloss[1]
         end
         --update Q
-        local x,y,target 
+        local x,y 
         local s,a,r,sPrime,a_actual
         s = D.s[mask:squeeze()]
         s = s:repeatTensor(env.act_dim)
@@ -199,8 +204,9 @@ for t=1,num_steps do
         a_actual = D.a[mask:squeeze()]
         for i=1,mb_dim do
             if env.process_for_retrieval then
+                local cur_state = env.process_for_retrieval(D.obs[mind[i][1] ])
                 for a=1,env.act_dim do
-                    state[mb_dim*(a-1)+i] = env.process_for_retrieval(D.obs[mind[i][1] ])
+                    state[mb_dim*(a-1)+i]:copy(cur_state)
                 end
                 statePrime[i] = env.process_for_retrieval(D.obsPrime[mind[i][1] ])
             else
@@ -212,25 +218,25 @@ for t=1,num_steps do
         end
         if use_qnet then
             if use_target_network then
-                --_,qind = q_network:forward(statePrime:cuda()):max(2)
-                --qPrime = target_network:forward(statePrime:cuda()):gather(2,qind)
-                qPrime,qind = target_network:forward(statePrime:cuda()):max(2)
+                --_,qind = q_network:forward(statePrime):max(2)
+                --qPrime = target_network:forward(statePrime):gather(2,qind)
+                qPrime,qind = target_network:forward(statePrime):max(2)
             else
-                qPrime,qind = q_network:forward(statePrime:cuda()):max(2)
+                qPrime,qind = q_network:forward(statePrime):max(2)
             end
         else
             Q_clone = Q:clone()
         end
 
-        local possible = {state:cuda(),action:cuda()}
+        local possible = {state,action}
 
         if use_rmax then
             C = network:forward(possible)
         end
     
         
-        target = torch.zeros(mb_dim*env.act_dim)
-        target_mask = torch.zeros(mb_dim*env.act_dim,1):byte()
+        target:zero()
+        target_mask:zero()
         for i=1,mb_dim do
             --you can experience all actions under threshold, since they all go to heaven!
             local known_flag = true
@@ -272,11 +278,11 @@ for t=1,num_steps do
                 q_w:copy(x)
             end
             q_network:zeroGradParameters()
-            local o = q_network:forward(state:cuda())
-            local used = o:gather(2,aind:cuda())
-            local loss = mse_crit:forward(used,target:cuda())
-            local grad = mse_crit:backward(used,target:cuda())
-            local act_grad = torch.zeros(env.act_dim*mb_dim,env.act_dim):cuda()
+            local o = q_network:forward(state)
+            local used = o:gather(2,aind)
+            local loss = mse_crit:forward(used,target)
+            local grad = mse_crit:backward(used,target)
+            act_grad:zero()
             for i=1,mb_dim*env.act_dim do
                 if target_mask[i][1] == 1 then
                     act_grad[i][aind[i][1]] = grad[i]
