@@ -26,7 +26,7 @@ target_refresh = 1e3
 alpha = .1
 gamma = .9
 net_reward = 0
-refresh = 5e2
+refresh = 1e3
 num_steps = 1e5
 
 
@@ -112,11 +112,18 @@ local get_data = function(data,action_data,dataPrime)
 end
 set_data_func(get_data)
 final_time = -1
-state = torch.zeros(mb_dim*env.act_dim,in_dim):cuda()
+state = torch.zeros(mb_dim,in_dim):cuda()
 statePrime = torch.zeros(mb_dim,in_dim):cuda()
-action = torch.zeros(mb_dim*env.act_dim,env.act_dim):cuda()
-target = torch.zeros(mb_dim*env.act_dim):cuda()
-target_mask = torch.zeros(mb_dim*env.act_dim,1):byte()
+possible = {}
+possible[1] = torch.zeros(mb_dim*env.act_dim,in_dim):cuda()
+possible[2] = torch.zeros(mb_dim*env.act_dim,env.act_dim):cuda()
+for i =1,mb_dim do
+    for a = 1,env.act_dim  do
+        possible[2][mb_dim*(a-1)+i][a] = 1
+    end
+end
+target = torch.zeros(mb_dim,env.act_dim):cuda()
+target_mask = torch.zeros(mb_dim,env.act_dim,1):byte()
 act_grad = torch.zeros(env.act_dim*mb_dim,env.act_dim):cuda()
 aind = torch.LongTensor(mb_dim*env.act_dim,1):cuda()
 for a=1,env.act_dim do
@@ -180,12 +187,8 @@ for t=1,num_steps do
         --gotta re-perm if runnning train_dis multiple times
         mb_ind = torch.randperm(math.min(t,D.size))
         local mask = torch.zeros(D.size,1):byte()
-        action:zero()
         for i =1,mb_dim do
             mask[mb_ind[i] ] = 1
-            for a = 1,env.act_dim  do
-                action[mb_dim*(a-1)+i][a] = 1
-            end
         end
         mind = mask:nonzero()
         if use_rmax then
@@ -204,16 +207,14 @@ for t=1,num_steps do
         a_actual = D.a[mask:squeeze()]
         for i=1,mb_dim do
             if env.process_for_retrieval then
-                local cur_state = env.process_for_retrieval(D.obs[mind[i][1] ])
-                for a=1,env.act_dim do
-                    state[mb_dim*(a-1)+i]:copy(cur_state)
-                end
+                state[i] = env.process_for_retrieval(D.obs[mind[i][1] ])
                 statePrime[i] = env.process_for_retrieval(D.obsPrime[mind[i][1] ])
             else
-                for a=1,env.act_dim do
-                    state[mb_dim*(a-1)+i] = D.obs[mind[i][1] ]
-                end
+                state[i] = D.obs[mind[i][1] ]
                 statePrime[i] = D.obsPrime[mind[i][1] ]
+            end
+            for a=1,env.act_dim do
+                possible[1][mb_dim*(a-1)+i] = state[i]
             end
         end
         if use_qnet then
@@ -227,8 +228,6 @@ for t=1,num_steps do
         else
             Q_clone = Q:clone()
         end
-
-        local possible = {state,action}
 
         if use_rmax then
             C = network:forward(possible)
@@ -250,8 +249,8 @@ for t=1,num_steps do
                         if a == a_actual[i] then
                             known_flag = false
                         end
-                        target[ind] = rmax
-                        target_mask[ind] = 1
+                        target[i][a] = rmax
+                        target_mask[i][a] = 1
                     end
                 end
             end
@@ -259,14 +258,14 @@ for t=1,num_steps do
             if known_flag then
                 --print('known!')
                 local ind = mb_dim*(a_actual[i]-1)+i
-                target_mask[ind] = 1
+                target_mask[i][a_actual[i] ] = 1
                 if term[i] == 1 then
-                    target[ind] = r[i]
+                    target[i][a_actual[i] ] = r[i]
                 else
                     if use_qnet then
-                        target[ind] = r[i]+gamma*torch.max(qPrime[i])
+                        target[i][a_actual[i] ] = r[i]+gamma*torch.max(qPrime[i])
                     else
-                        target[ind] = r[i]+gamma*torch.max(Q_clone[sPrime[i]])
+                        target[i][a_actual[i] ] = r[i]+gamma*torch.max(Q_clone[sPrime[i]])
                     end
                 end
             end
@@ -279,15 +278,9 @@ for t=1,num_steps do
             end
             q_network:zeroGradParameters()
             local o = q_network:forward(state)
-            local used = o:gather(2,aind)
-            local loss = mse_crit:forward(used,target)
-            local grad = mse_crit:backward(used,target)
-            act_grad:zero()
-            for i=1,mb_dim*env.act_dim do
-                if target_mask[i][1] == 1 then
-                    act_grad[i][aind[i][1]] = grad[i]
-                end
-            end
+            local loss = mse_crit:forward(o,target)
+            act_grad = mse_crit:backward(o,target)
+            act_grad[target_mask:eq(0)] = 0
             q_network:backward(state,act_grad)
             return loss,q_dw
             end
@@ -300,8 +293,8 @@ for t=1,num_steps do
             for i=1,mb_dim do
                 for a=1,env.act_dim do
                     local ind = mb_dim*(a-1)+i
-                    if target_mask[ind][1] == 1 then
-                        Q[s[i] ][a] = (1-alpha)*Q[s[i] ][a] + (alpha)*target[ind]
+                    if target_mask[i][a] == 1 then
+                        Q[s[i] ][a] = (1-alpha)*Q[s[i] ][a] + (alpha)*target[i][a]
                     end
                 end
             end
