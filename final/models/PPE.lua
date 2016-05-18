@@ -16,7 +16,6 @@ thresh = .3 --1.1 --in_dim/20
 act_dim = env.act_dim
 fact_dim = 2000
 hid_dim = 1000 --1000
-mb_dim = 32 --320
 config = {learningRate = 1e-3}
 dropout = .5
 
