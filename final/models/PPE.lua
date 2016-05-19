@@ -10,7 +10,7 @@ require '../util/BCE'
 condition = 1
 setup = function(env)
 in_dim = D.state_dim*D.num_frames
-state_dim = env.state_dim
+state_dim = D.state_dim
 thresh = .3 --1.1 --in_dim/20
 act_dim = env.act_dim
 fact_dim = 2000
@@ -23,7 +23,7 @@ if env.spatial then
     input = nn.Identity()()
     view = nn.View(-1,D.num_frames,84,84)(input)
     action = nn.Identity()()
-    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(D.num_frames+1,64,6,6,2,2)(view))
+    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(D.num_frames,64,6,6,2,2)(view))
     conv2 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv1))
     conv3 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv2))
     num_conv = 64*10*10
@@ -38,11 +38,11 @@ if env.spatial then
     pred_network = pred_network:cuda()
     --error pred network
     input = nn.Identity()()
-    in_view = nn.View(-1,D.num_frames+1,84,84)(input)
+    in_view = nn.View(-1,D.num_frames,84,84)(input)
     action = nn.Identity()()
     pred = nn.Identity()()
     pred_view = nn.View(-1,1,84,84)(pred)
-    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(D.num_frames+2,64,6,6,2,2)(nn.JoinTable(2){in_view,pred_view}))
+    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(D.num_frames+1,64,6,6,2,2)(nn.JoinTable(2){in_view,pred_view}))
     conv2 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv1))
     s_conv = nn.View(num_conv)(nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv2)))
     hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(num_conv,hid_dim,false)(s_conv),nn.Linear(act_dim,hid_dim,false)(action)}))
@@ -125,7 +125,7 @@ train = function(x)
     pred_network:backward({data,action_data},grad)
     --t_err = torch.pow(o-dataPrime,2):sum(2)
     if o:dim() >2 then
-        t_err = BCE(o:view(mb_dim,state_dim),dataPrime:view(mb_dim,state_dim))
+        t_err = BCE(o:view(opt.mb_dim,state_dim),dataPrime)
     else
         t_err = BCE(o,dataPrime)
     end

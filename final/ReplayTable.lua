@@ -102,9 +102,9 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
     --]]
     function D.get_pred_state(s)
         if s:dim() == 1 then
-            return s[{{D.state_dim*(D.num_frames-1),-1}}]
+            return s[{{D.state_dim*(D.num_frames-1)+1,-1}}]
         else
-            return s[{{},{D.state_dim*(D.num_frames-1),-1}}]
+            return s[{{},{D.state_dim*(D.num_frames-1)+1,-1}}]
         end
     end
     function D.sample_one(D)
