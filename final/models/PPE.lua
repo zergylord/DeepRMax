@@ -11,7 +11,7 @@ require '../util/BCE'
 condition = 1
 setup = function(env)
 in_dim = env.in_dim
-state_dim = env.image_size:prod()
+state_dim = env.state_dim
 thresh = .3 --1.1 --in_dim/20
 act_dim = env.act_dim
 fact_dim = 2000
@@ -100,9 +100,9 @@ network = network:cuda()
 w,dw = network:getParameters()
 mse_crit = nn.MSECriterion():cuda()
 bce_crit = nn.BCECriterion():cuda()
-data = torch.zeros(mb_dim,in_dim):cuda()
-dataPrime = torch.zeros(mb_dim,state_dim):cuda()
-action_data = torch.zeros(mb_dim,act_dim):cuda()
+data = torch.zeros(opt.mb_dim,in_dim):cuda()
+dataPrime = torch.zeros(opt.mb_dim,state_dim):cuda()
+action_data = torch.zeros(opt.mb_dim,act_dim):cuda()
 end
 --[[
 --Public

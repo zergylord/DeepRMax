@@ -106,7 +106,8 @@ end
 --[[
 --called every 'refresh' steps, normally to plot data
 --]]
-function env.get_info(network,err_network,pred_network,q_network) 
+function env.get_info(t,reward_hist,network,err_network,pred_network,q_network) 
+    gnuplot.plot(reward_hist[{{1,t/refresh}}])
 end
 --[[
 env.setup()

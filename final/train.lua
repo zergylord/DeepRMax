@@ -8,36 +8,41 @@ require 'cunn'
 require 'util.BCE'
 --torch.manualSeed(123)
 --cutorch.manualSeed(123)
-torch.setnumthreads(1)
+--torch.setnumthreads(1)
 local timer = torch.Timer()
+gnuplot.figure(1)
 
-
+cmd = torch.CmdLine()
 --set hyper parameters-------------
-update_freq = 4
---use_rmax = true
-mb_dim = 32 --320
-rmax = .1
+cmd:option('-update_freq',4,'steps per weight update step')
+cmd:option('-use_rmax',true,'use r-max style exploration')
+cmd:option('-mb_dim',32,'size of minibatch')
+cmd:option('-rmax',.1,'maximum reward value for purposes of exploration')
+cmd:option('-refresh',1e4,'steps until information is displayed')
+cmd:option('-num_steps',1e7,'total steps to run')
+cmd:option('-use_egreedy',true,'use epsilon greedy action selection')
+cmd:option('-use_target_network',true,'use a target network for updates')
+cmd:option('-target_refresh',1e4,'how often to copy network into target network')
+cmd:option('-learn_start',1024,'when to start making weight updates')
+cmd:option('-clip_delta',true,'false or constant value for gradients')
+cmd:option('-gamma',.99,'discount factor')
+cmd:option('-q_learning_rate',1e-3,'learning rate for q network')
+cmd:option('-environment','atari','training task to use')
+opt = cmd:parse(arg)
+print(opt)
 q_config = {
-    learningRate  = 1e-3
+    learningRate  = opt.q_learning_rate
     }
-refresh = 1e3
-num_steps = 1e7
-use_egreedy = true
-epsilon = (-torch.linspace(0,.9,1e6)+1):cat(torch.ones(num_steps-1e6):mul(.1))
-use_target_network = true
-target_refresh = 1e4
---use_mnist = true
-clip_delta = 1
-gamma = .9
+if opt.use_egreedy then
+epsilon = (-torch.linspace(0,.9,1e6)+1):cat(torch.ones(opt.num_steps-1e6):mul(.1))
+end
 net_reward = 0
-reward_hist = torch.zeros(num_steps/refresh)
+reward_hist = torch.zeros(opt.num_steps/opt.refresh)
 
 
 --select environment---------------------------------------------
---require 'environments.combolock'
---require 'environments.grid'
-require 'environments.atari'
-env.setup{refresh=refresh,num_steps=num_steps}
+require('environments/' .. opt.environment)
+env.setup{refresh=opt.refresh,num_steps=opt.num_steps}
 D = ReplayTable.init(env.in_dim,env.byte_storage)
 
 --select exploration method------------------------------------
@@ -49,6 +54,7 @@ setup(env)
 --setup value function------------------------------------
 local input,output
 if env.spatial then
+    print(' using conv net')
     input = nn.Identity()()
     local view = nn.View(-1,env.num_hist+1,env.image_size[1],env.image_size[2])(input)
     local conv1 = nn.ReLU()(nn.SpatialConvolution(env.num_hist+1,32,8,8,4,4)(view))
@@ -58,10 +64,11 @@ if env.spatial then
     local last_hid = nn.ReLU()(nn.Linear(conv_dim,512)(nn.View(-1,conv_dim)(conv3)))
     output = nn.Linear(512,env.act_dim)(last_hid)
 else
+    print('using mlp')
     local hid_dim = 100
     input = nn.Identity()()
     local hid = nn.ReLU()(nn.Linear(in_dim,hid_dim)(input))
-    local output =nn.Linear(hid_dim,env.act_dim)(hid)
+    output =nn.Linear(hid_dim,env.act_dim)(hid)
 end
 q_network = nn.gModule({input},{output})
 q_network = q_network:cuda()
@@ -77,32 +84,34 @@ mse_crit = nn.MSECriterion():cuda()
 
 
 --setup experience replay------------------------------
+blank = torch.zeros(opt.mb_dim,env.act_dim)
 local get_data = function(data,action_data,dataPrime)
-    data = mb_s
-    action_data = mb_a
+    data[{{}}] = mb_s
+    blank:zero()
+    action_data[{{}}] = blank:scatter(2,mb_a:long():view(opt.mb_dim,1),1)
     if env.get_pred_state then
-        dataPrime = env.get_pred_state(mb_sPrime)
+        dataPrime[{{}}] = env.get_pred_state(mb_sPrime)
     else
-        dataPrime = mb_sPrime
+        dataPrime[{{}}] = mb_sPrime
     end
 end
 set_data_func(get_data)
 final_time = -1
 possible = {}
-possible[1] = torch.zeros(mb_dim*env.act_dim,in_dim):cuda()
-possible[2] = torch.zeros(mb_dim*env.act_dim,env.act_dim):cuda()
-for i =1,mb_dim do
+possible[1] = torch.zeros(opt.mb_dim*env.act_dim,in_dim):cuda()
+possible[2] = torch.zeros(opt.mb_dim*env.act_dim,env.act_dim):cuda()
+for i =1,opt.mb_dim do
     for a = 1,env.act_dim  do
-        possible[2][mb_dim*(a-1)+i][a] = 1
+        possible[2][opt.mb_dim*(a-1)+i][a] = 1
     end
 end
-target = torch.zeros(mb_dim,env.act_dim):cuda()
-target_mask = torch.zeros(mb_dim,env.act_dim,1):byte()
-act_grad = torch.zeros(env.act_dim*mb_dim,env.act_dim):cuda()
-aind = torch.LongTensor(mb_dim*env.act_dim,1):cuda()
+target = torch.zeros(opt.mb_dim,env.act_dim):cuda()
+target_mask = torch.zeros(opt.mb_dim,env.act_dim,1):byte()
+act_grad = torch.zeros(env.act_dim*opt.mb_dim,env.act_dim):cuda()
+aind = torch.LongTensor(opt.mb_dim*env.act_dim,1):cuda()
 for a=1,env.act_dim do
-    for i=1,mb_dim do
-        aind[mb_dim*(a-1)+i] = a
+    for i=1,opt.mb_dim do
+        aind[opt.mb_dim*(a-1)+i] = a
     end
 end
 local function q_train(x)
@@ -117,9 +126,9 @@ local function q_train(x)
     local loss = 0
     --]]
     act_grad[target_mask:eq(0)] = 0
-    if clip_delta then
-        act_grad[act_grad:gt(0)] = clip_delta
-        act_grad[act_grad:lt(0)] = -clip_delta
+    if opt.clip_delta then
+        act_grad[act_grad:gt(0)] = 1
+        act_grad[act_grad:lt(0)] = -1
     end
     q_network:backward(mb_s,act_grad)
     return loss,q_dw
@@ -127,18 +136,17 @@ end
 --main loop------------------------------------------------------
 cumloss =0 
 s = env.reset()
-for t=1,num_steps do
+for t=1,opt.num_steps do
     r = 0
     --select action
     local vals = q_network:forward(s:cuda())
-    _,a = vals:max(2)
-    a = a[1]
+    _,a = vals:max(vals:dim())
+    a = a:squeeze()
     if use_egreedy then
         if torch.rand(1)[1] < epsilon[t] then
-            a[1] = torch.random(env.act_dim)
+            a = torch.random(env.act_dim)
         end
     end
-    a = a[1]
 
     --perform action
     r,sPrime,term = env.step(a)
@@ -149,17 +157,15 @@ for t=1,num_steps do
     end
     net_reward = net_reward + r
 
-    --TODO:roll back into env
-    env.update_step_stats(s,a)
 
     --record history
     D:add(s,a,r,sPrime,term)
 
     --update model params
-    if t > mb_dim and t % update_freq == 0 then
+    if t > opt.learn_start and t % opt.update_freq == 0 then
         --gotta re-perm if runnning train_dis multiple times
-        mb_s,mb_a,mb_r,mb_sPrime,mb_term = D:get_samples(mb_dim)
-        if use_rmax then
+        mb_s,mb_a,mb_r,mb_sPrime,mb_term = D:get_samples(opt.mb_dim)
+        if opt.use_rmax then
             --update adver nets
             _,batchloss = optim.adam(train,w,config)
             cumloss = cumloss + batchloss[1]
@@ -173,10 +179,10 @@ for t=1,num_steps do
             qPrime,qind = q_network:forward(mb_sPrime):max(2)
         end
 
-        if use_rmax then
-            for i=1,mb_dim do
+        if opt.use_rmax then
+            for i=1,opt.mb_dim do
                 for a=1,env.act_dim do
-                    possible[1][mb_dim*(a-1)+i] = mb_s[i]
+                    possible[1][opt.mb_dim*(a-1)+i] = mb_s[i]
                 end
             end
             C = network:forward(possible)
@@ -185,12 +191,12 @@ for t=1,num_steps do
         
         target:zero()
         target_mask:zero()
-        for i=1,mb_dim do
+        for i=1,opt.mb_dim do
             --you can experience all actions under threshold, since they all go to heaven!
             local known_flag = true
-            if use_rmax then
+            if opt.use_rmax then
                 for a = 1,env.act_dim do
-                    local ind = mb_dim*(a-1)+i
+                    local ind = opt.mb_dim*(a-1)+i
                     local unknown, chance_unknown = get_knownness(C,ind)
                     env.update_replay_stats(mb_s[i],a,chance_unknown)
 
@@ -198,7 +204,7 @@ for t=1,num_steps do
                         if a == mb_a[i] then
                             known_flag = false
                         end
-                        target[i][a] = rmax
+                        target[i][a] = opt.rmax
                         target_mask[i][a] = 1
                     end
                 end
@@ -210,32 +216,36 @@ for t=1,num_steps do
                 if mb_term[i] == 1 then
                     target[i][mb_a[i] ] = mb_r[i]
                 else
-                    target[i][mb_a[i] ] = mb_r[i]+gamma*torch.max(qPrime[i])
+                    target[i][mb_a[i] ] = mb_r[i]+opt.gamma*torch.max(qPrime[i])
                 end
             end
         end
         --update value function----------------------------
         _,batchloss = optim.adam(q_train,q_w,q_config)
-        if use_target_network and t % target_refresh == 0 then
+        if use_target_network and t % opt.target_refresh == 0 then
             target_network = q_network:clone()
         end
     end
-    s = sPrime 
-    if t % refresh == 0 then
-        env.get_info(t,network,err_network,pred_network,q_network)
+    if term then
+        s = env.reset()
+    else
+        s = sPrime 
+    end
+    if t % opt.refresh == 0 then
+        reward_hist[t/opt.refresh] = net_reward
+        env.get_info(t,reward_hist,network,err_network,pred_network,q_network)
 
 
         torch.save('w.t7',{q_w,w})
 
-        print(t,net_reward/refresh,cumloss,q_w:norm(),q_dw:norm(),timer:time().real)
+        print(t,net_reward/opt.refresh,cumloss,q_w:norm(),q_dw:norm(),timer:time().real)
         timer:reset()
         cumloss = 0
-        if num_state and net_reward/refresh > ((1/num_state)*(.8)) then
+        if num_state and net_reward/opt.refresh > ((1/num_state)*(.8)) then
             final_time = t
+            print(final_time)
             break
         end
-        reward_hist[t/refresh] = net_reward
-        gnuplot.plot(reward_hist[{{1,t/refresh}}])
         net_reward = 0
         collectgarbage()
     end

@@ -70,7 +70,7 @@ function ReplayTable.init(in_dim,byte_storage)
             for i=1,mb_dim do
                 s[i],sPrime[i],a[i],r[i],term[i] = D:sample_one()
             end
-            return s,a,r,sPrime,term
+            return s:cuda(),a,r,sPrime:cuda(),term
         end
     end
     function D.sample_one(D)
