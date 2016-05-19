@@ -4,7 +4,7 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
     D.num_frames = num_frames
     D.byte_storage = byte_storage
     D.state_dim = state_dim
-    D.size = 1e6
+    D.size = 1e4
     D.buf_size = 1024
     D.a = torch.zeros(D.size)
     D.r = torch.zeros(D.size)
@@ -108,7 +108,7 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
         end
     end
     function D.sample_one(D)
-        local ind = torch.random(D.fill-D.num_frames+1)
+        local ind = torch.random(D.fill-D.num_frames)
         return D:get_future(ind),D:get_future(ind+1),D.a[ind],D.r[ind],D.term[ind]
     end
 
