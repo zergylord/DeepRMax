@@ -128,8 +128,8 @@ local function q_train(x)
     --]]
     act_grad[target_mask:eq(0)] = 0
     if opt.clip_delta then
-        act_grad[act_grad:gt(0)] = 1
-        act_grad[act_grad:lt(0)] = -1
+        act_grad[act_grad:gt(1)] = 1
+        act_grad[act_grad:lt(-1)] = -1
     end
     q_network:backward(mb_s,act_grad)
     return loss,q_dw
@@ -140,7 +140,7 @@ s = env.reset()
 for t=1,opt.num_steps do
     r = 0
     --select action
-    if opt.use_egreedy and torch.rand(1)[1] < epsilon[t] then
+    if (opt.use_egreedy and torch.rand(1)[1] < epsilon[t]) or (t <= opt.learn_start) then
         a = torch.random(env.act_dim)
     else
         if D.num_frames > 1 then
