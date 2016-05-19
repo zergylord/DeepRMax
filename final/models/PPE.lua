@@ -1,7 +1,6 @@
 require 'nngraph'
 require 'cunn'
 require 'optim'
-require 'distributions'
 require 'gnuplot'
 require '../util/BCE'
 --conditions:

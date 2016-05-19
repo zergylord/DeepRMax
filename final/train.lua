@@ -4,7 +4,7 @@ require 'gnuplot'
 require 'ReplayTable'
 --require 'hdf5'
 require 'cunn'
-require 'util.BCE'
+require 'util/BCE'
 --torch.manualSeed(123)
 --cutorch.manualSeed(123)
 --torch.setnumthreads(1)
@@ -47,7 +47,7 @@ env.setup{refresh=opt.refresh,num_steps=opt.num_steps}
 D = ReplayTable.init(env.state_dim,opt.num_frames,env.byte_storage)
 
 --select exploration method------------------------------------
-require 'models.PPE'
+require 'models/PPE'
 --require 'train_pred_GAN.lua'
 setup(env)
 
