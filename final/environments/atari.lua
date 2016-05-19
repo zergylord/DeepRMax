@@ -30,6 +30,8 @@ function env.setup(params)
     A = torch.eye(env.act_dim)
     --init viz variables----------------------------------
     bonus_hist = torch.zeros(num_steps/refresh)
+    vid = torch.zeros(100,84,84)
+    record = 100
 end
 --[[
 --clears internal state and returns initial state information
@@ -43,7 +45,12 @@ end
 --]]
 function env.step(a)
     local nextScreen,r,term = game:step(validA[a])
-    return r,prep:forward(nextScreen[1]):view(env.state_dim),term
+    local frame = prep:forward(nextScreen[1]):view(env.state_dim)
+    if record > 0 then
+        vid[100-record+1]:copy(frame)
+        record = record -1
+    end
+    return r,frame,term
 end
 --[[
 --returns one-hot vector for action a
@@ -78,7 +85,11 @@ end
 --called every 'refresh' steps, normally to plot data
 --]]
 function env.get_info(t,reward_hist,network,err_network,pred_network,q_network) 
-    gnuplot.plot(reward_hist[{{1,t/refresh}}])
+    --gnuplot.plot(reward_hist[{{1,t/refresh}}])
+    for i =1,100 do
+        gnuplot.imagesc(vid[i])
+    end
+    record = 100
 end
 --[[
 env.setup()

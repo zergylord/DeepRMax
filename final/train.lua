@@ -1,6 +1,5 @@
 require 'nngraph'
 require 'optim'
-require 'distributions'
 require 'gnuplot'
 require 'ReplayTable'
 --require 'hdf5'
@@ -141,7 +140,7 @@ s = env.reset()
 for t=1,opt.num_steps do
     r = 0
     --select action
-    if use_egreedy and torch.rand(1)[1] < epsilon[t] then
+    if opt.use_egreedy and torch.rand(1)[1] < epsilon[t] then
         a = torch.random(env.act_dim)
     else
         if D.num_frames > 1 then
