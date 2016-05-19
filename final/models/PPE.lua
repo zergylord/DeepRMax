@@ -10,7 +10,7 @@ require '../util/BCE'
 --3 -> predict making cutoff, not err directly
 condition = 1
 setup = function(env)
-in_dim = env.in_dim
+in_dim = D.state_dim*D.num_frames
 state_dim = env.state_dim
 thresh = .3 --1.1 --in_dim/20
 act_dim = env.act_dim
@@ -22,9 +22,9 @@ dropout = .5
 if env.spatial then
     --setup pred_network
     input = nn.Identity()()
-    view = nn.View(-1,env.num_hist+1,84,84)(input)
+    view = nn.View(-1,D.num_frames,84,84)(input)
     action = nn.Identity()()
-    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(env.num_hist+1,64,6,6,2,2)(view))
+    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(D.num_frames+1,64,6,6,2,2)(view))
     conv2 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv1))
     conv3 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv2))
     num_conv = 64*10*10
@@ -39,11 +39,11 @@ if env.spatial then
     pred_network = pred_network:cuda()
     --error pred network
     input = nn.Identity()()
-    in_view = nn.View(-1,env.num_hist+1,84,84)(input)
+    in_view = nn.View(-1,D.num_frames+1,84,84)(input)
     action = nn.Identity()()
     pred = nn.Identity()()
     pred_view = nn.View(-1,1,84,84)(pred)
-    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(env.num_hist+2,64,6,6,2,2)(nn.JoinTable(2){in_view,pred_view}))
+    conv1 = nn.ReLU()(nn.SpatialConvolutionMM(D.num_frames+2,64,6,6,2,2)(nn.JoinTable(2){in_view,pred_view}))
     conv2 = nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv1))
     s_conv = nn.View(num_conv)(nn.ReLU()(nn.SpatialConvolutionMM(64,64,6,6,2,2,2,2)(conv2)))
     hid = nn.Dropout(dropout)(nn.ReLU()(nn.CAddTable(){nn.Linear(num_conv,hid_dim,false)(s_conv),nn.Linear(act_dim,hid_dim,false)(action)}))
@@ -233,9 +233,9 @@ standard = function()
         optim.adam(train,w,config)
         if i % 1e3==0 then
             network:forward{all_state:cuda(),all_action:cuda()}
-            pred_err[{{}}] = network.output:double()
-            gnuplot.imagesc(all_statePrime-pred_network.output:double())
-            local worst =torch.max(all_statePrime-pred_network.output:double())
+            pred_err[{{}}] = network.output:float()
+            gnuplot.imagesc(all_statePrime-pred_network.output:float())
+            local worst =torch.max(all_statePrime-pred_network.output:float())
             print(i,worst)
             if worst < .5 then
                 return
@@ -251,8 +251,8 @@ atari = function()
     setup()
     --setup MDP
     raw,actions = unpack(torch.load('frames.dat'))
-    raw = raw:double()/256
-    --raw = (raw:double()-raw:double():mean())/128
+    raw = raw:float()/256
+    --raw = (raw:float()-raw:float():mean())/128
     frames = torch.zeros(raw:size(1),num_hist+1,84,84)
     for i=num_hist+1,raw:size(1) do
         for j=1,num_hist+1 do

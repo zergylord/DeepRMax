@@ -97,7 +97,7 @@ end
 --to record relevant statistics (e.g. bonus percentage(
 --]]
 function env.update_replay_stats(obs,a,chance_unknown)
-    local s = obs:double():nonzero()[1][1]
+    local s = obs:float():nonzero()[1][1]
     replay_visits[s ][a] = replay_visits[s ][a] + 1
     bonus[s ][a] = bonus[s][a] + chance_unknown
 end
@@ -115,12 +115,12 @@ function env.get_info(t,reward_hist,network,err_network,pred_network,q_network)
         gnuplot.raw("set title 'Q-values' ")
         gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
         gnuplot.raw('set yrange [*:*] noreverse')
-        gnuplot.plot({Q:mean(2)},{Q:max(2):double()},{Q:min(2):double()})
+        gnuplot.plot({Q:mean(2)},{Q:max(2):float()},{Q:min(2):float()})
     else
         gnuplot.raw("set title 'Q-values' ")
         gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
         gnuplot.raw('set yrange [0:1] noreverse')
-        gnuplot.plot({Q:mean(2)},{Q:max(2):double()},{Q:min(2):double()})
+        gnuplot.plot({Q:mean(2)},{Q:max(2):float()},{Q:min(2):float()})
     end
 
 
@@ -158,7 +158,7 @@ function env.get_info(t,reward_hist,network,err_network,pred_network,q_network)
     cur_actual_err = torch.zeros(num_state,env.act_dim)
 
     network:forward{all_state:cuda(),all_action:cuda()}
-    cur_pred = pred_network.output:double()
+    cur_pred = pred_network.output:float()
     cur_actual_pred = all_statePrime
     cur_err = get_knownness(err_network.output):reshape(num_state,env.act_dim)
     cur_actual_err = BCE(cur_pred,cur_actual_pred):reshape(num_state,env.act_dim)

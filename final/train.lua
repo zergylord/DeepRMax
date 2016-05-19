@@ -10,6 +10,7 @@ require 'util.BCE'
 --cutorch.manualSeed(123)
 --torch.setnumthreads(1)
 local timer = torch.Timer()
+torch.setdefaulttensortype('torch.FloatTensor')
 gnuplot.figure(1)
 
 cmd = torch.CmdLine()
@@ -23,18 +24,19 @@ cmd:option('-num_steps',1e7,'total steps to run')
 cmd:option('-use_egreedy',true,'use epsilon greedy action selection')
 cmd:option('-use_target_network',true,'use a target network for updates')
 cmd:option('-target_refresh',1e4,'how often to copy network into target network')
-cmd:option('-learn_start',1024,'when to start making weight updates')
+cmd:option('-learn_start',5e4,'when to start making weight updates')
 cmd:option('-clip_delta',true,'false or constant value for gradients')
 cmd:option('-gamma',.99,'discount factor')
 cmd:option('-q_learning_rate',1e-3,'learning rate for q network')
 cmd:option('-environment','atari','training task to use')
+cmd:option('-num_frames',4,'number of consequtive frames for input')
 opt = cmd:parse(arg)
 print(opt)
 q_config = {
     learningRate  = opt.q_learning_rate
     }
 if opt.use_egreedy then
-epsilon = (-torch.linspace(0,.9,1e6)+1):cat(torch.ones(opt.num_steps-1e6):mul(.1))
+epsilon = torch.ones(opt.learn_start):cat((-torch.linspace(0,.9,1e6)+1):cat(torch.ones(opt.num_steps-1e6-opt.learn_start):mul(.1)))
 end
 net_reward = 0
 reward_hist = torch.zeros(opt.num_steps/opt.refresh)
@@ -43,7 +45,7 @@ reward_hist = torch.zeros(opt.num_steps/opt.refresh)
 --select environment---------------------------------------------
 require('environments/' .. opt.environment)
 env.setup{refresh=opt.refresh,num_steps=opt.num_steps}
-D = ReplayTable.init(env.in_dim,env.byte_storage)
+D = ReplayTable.init(env.state_dim,opt.num_frames,env.byte_storage)
 
 --select exploration method------------------------------------
 require 'models.PPE'
@@ -56,8 +58,8 @@ local input,output
 if env.spatial then
     print(' using conv net')
     input = nn.Identity()()
-    local view = nn.View(-1,env.num_hist+1,env.image_size[1],env.image_size[2])(input)
-    local conv1 = nn.ReLU()(nn.SpatialConvolution(env.num_hist+1,32,8,8,4,4)(view))
+    local view = nn.View(-1,D.num_frames,env.image_size[1],env.image_size[2])(input)
+    local conv1 = nn.ReLU()(nn.SpatialConvolution(D.num_frames,32,8,8,4,4)(view))
     local conv2 = nn.ReLU()(nn.SpatialConvolution(32,64,4,4,2,2)(conv1))
     local conv3 = nn.ReLU()(nn.SpatialConvolution(64,64,3,3,1,1)(conv2))
     local conv_dim = 64*7*7
@@ -89,8 +91,8 @@ local get_data = function(data,action_data,dataPrime)
     data[{{}}] = mb_s
     blank:zero()
     action_data[{{}}] = blank:scatter(2,mb_a:long():view(opt.mb_dim,1),1)
-    if env.get_pred_state then
-        dataPrime[{{}}] = env.get_pred_state(mb_sPrime)
+    if D.num_frames > 1 then
+        dataPrime[{{}}] = D.get_pred_state(mb_sPrime)
     else
         dataPrime[{{}}] = mb_sPrime
     end
@@ -139,13 +141,17 @@ s = env.reset()
 for t=1,opt.num_steps do
     r = 0
     --select action
-    local vals = q_network:forward(s:cuda())
-    _,a = vals:max(vals:dim())
-    a = a:squeeze()
-    if use_egreedy then
-        if torch.rand(1)[1] < epsilon[t] then
-            a = torch.random(env.act_dim)
+    if use_egreedy and torch.rand(1)[1] < epsilon[t] then
+        a = torch.random(env.act_dim)
+    else
+        if D.num_frames > 1 then
+            full_s = D:get_past(s):cuda()
+        else
+            full_s = s:cuda()
         end
+        local vals = q_network:forward(full_s)
+        _,a = vals:max(vals:dim())
+        a = a:squeeze()
     end
 
     --perform action
@@ -159,7 +165,7 @@ for t=1,opt.num_steps do
 
 
     --record history
-    D:add(s,a,r,sPrime,term)
+    D:add(s,a,r,term)
 
     --update model params
     if t > opt.learn_start and t % opt.update_freq == 0 then
@@ -231,9 +237,17 @@ for t=1,opt.num_steps do
     else
         s = sPrime 
     end
+    if t % 1000 == 0 then collectgarbage() end
     if t % opt.refresh == 0 then
-        reward_hist[t/opt.refresh] = net_reward
+        reward_hist[t/opt.refresh] = net_reward/opt.refresh
         env.get_info(t,reward_hist,network,err_network,pred_network,q_network)
+        --[[
+        local frames = mb_s[1]:view(4,84*84)
+        for f=1,4 do
+            gnuplot.imagesc(frames[f]:view(84,84))
+            sys.sleep(1)
+        end
+        --]]
 
 
         torch.save('w.t7',{q_w,w})
@@ -247,7 +261,6 @@ for t=1,opt.num_steps do
             break
         end
         net_reward = 0
-        collectgarbage()
     end
 
 end
