@@ -35,7 +35,6 @@ if env.spatial then
     out = nn.Sigmoid()(deconv1)
     --out = deconv1
     pred_network = nn.gModule({input,action},{out})
-    pred_network = pred_network:cuda()
     --error pred network
     input = nn.Identity()()
     in_view = nn.View(-1,D.num_frames,84,84)(input)
@@ -58,7 +57,10 @@ if env.spatial then
         output = (nn.Linear(hid_dim,1,false)(hid))
     end
     err_network = nn.gModule({input,action,pred},{output})
-    err_network = err_network:cuda()
+    if opt.gpu then
+        pred_network = pred_network:cuda()
+        err_network = err_network:cuda()
+    end
 else
     --setup pred_network
     input = nn.Identity()()
@@ -67,7 +69,6 @@ else
     factor = (((nn.CMulTable(){nn.Linear(in_dim,hid_dim)(input),nn.Linear(act_dim,hid_dim)(action)})))
     output = nn.Sigmoid()(nn.Linear(hid_dim,in_dim)(factor))
     pred_network = nn.gModule({input,action},{output})
-    pred_network = pred_network:cuda()
     --error pred network
     input = nn.Identity()()
     action = nn.Identity()()
@@ -86,7 +87,10 @@ else
         output = (nn.Linear(hid_dim,1,false)(hid))
     end
     err_network = nn.gModule({input,action,pred},{output})
-    err_network = err_network:cuda()
+    if opt.gpu then
+        pred_network = pred_network:cuda()
+        err_network = err_network:cuda()
+    end
 end
 
 --full network (mainly for gathering params)
@@ -94,14 +98,21 @@ input = nn.Identity()()
 action = nn.Identity()()
 output = err_network{input,action,pred_network{input,action}}
 network = nn.gModule({input,action},{output})
-network = network:cuda()
 
+mse_crit = nn.MSECriterion()
+bce_crit = nn.BCECriterion()
+data = torch.zeros(opt.mb_dim,in_dim)
+dataPrime = torch.zeros(opt.mb_dim,state_dim)
+action_data = torch.zeros(opt.mb_dim,act_dim)
+if opt.gpu then
+    network = network:cuda()
+    mse_crit = mse_crit:cuda()
+    bce_crit = bce_crit:cuda()
+    data = data:cuda()
+    dataPrime = dataPrime:cuda()
+    action_data = action_data:cuda()
+end
 w,dw = network:getParameters()
-mse_crit = nn.MSECriterion():cuda()
-bce_crit = nn.BCECriterion():cuda()
-data = torch.zeros(opt.mb_dim,in_dim):cuda()
-dataPrime = torch.zeros(opt.mb_dim,state_dim):cuda()
-action_data = torch.zeros(opt.mb_dim,act_dim):cuda()
 end
 --[[
 --Public

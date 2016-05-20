@@ -4,15 +4,19 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
     D.num_frames = num_frames
     D.byte_storage = byte_storage
     D.state_dim = state_dim
-    D.size = 1e4
+    D.size = 1e6
     D.buf_size = 1024
     D.a = torch.zeros(D.size)
     D.r = torch.zeros(D.size)
     D.term = torch.zeros(D.size)
     if D.byte_storage then
         D.s = torch.ByteTensor(D.size,state_dim)
-        D.buf_s = torch.Tensor(D.buf_size,state_dim*D.num_frames):cuda()
-        D.buf_sPrime = torch.Tensor(D.buf_size,state_dim*D.num_frames):cuda()
+        D.buf_s = torch.Tensor(D.buf_size,state_dim*D.num_frames)
+        D.buf_sPrime = torch.Tensor(D.buf_size,state_dim*D.num_frames)
+        if opt.gpu then
+            D.buf_s = D.buf_s:cuda()
+            D.buf_sPrime = D.buf_sPrime:cuda()
+        end
         D.buf_i = D.buf_size+1
         D.buf_a = torch.zeros(D.size)
         D.buf_r = torch.zeros(D.size)
@@ -76,7 +80,11 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
             for i=1,mb_dim do
                 s[i],sPrime[i],a[i],r[i],term[i] = D:sample_one()
             end
-            return s:cuda(),a,r,sPrime:cuda(),term
+            if opt.gpu then
+                return s:cuda(),a,r,sPrime:cuda(),term
+            else
+                return s,a,r,sPrime,term
+            end
         end
     end
     --Present frame is rightmost

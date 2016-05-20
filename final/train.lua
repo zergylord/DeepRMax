@@ -29,6 +29,8 @@ cmd:option('-gamma',.99,'discount factor')
 cmd:option('-q_learning_rate',2.5e-4,'learning rate for q network')
 cmd:option('-environment','atari','training task to use')
 cmd:option('-num_frames',4,'number of consequtive frames for input')
+cmd:option('-gpu',true,'use GPU')
+cmd:option('-ddqn',true,'use double dqn update (requires target network)')
 opt = cmd:parse(arg)
 print(opt)
 q_config = {
@@ -73,12 +75,15 @@ else
     output =nn.Linear(hid_dim,env.act_dim)(hid)
 end
 q_network = nn.gModule({input},{output})
-q_network = q_network:cuda()
+mse_crit = nn.MSECriterion()
+if opt.gpu then
+    q_network = q_network:cuda()
+    mse_crit = mse_crit:cuda()
+end
 q_w,q_dw = q_network:getParameters()
 if opt.use_target_network then
     target_network = q_network:clone()
 end
-mse_crit = nn.MSECriterion():cuda()
 
 
 
@@ -100,17 +105,24 @@ end
 set_data_func(get_data)
 final_time = -1
 possible = {}
-possible[1] = torch.zeros(opt.mb_dim*env.act_dim,in_dim):cuda()
-possible[2] = torch.zeros(opt.mb_dim*env.act_dim,env.act_dim):cuda()
+possible[1] = torch.zeros(opt.mb_dim*env.act_dim,in_dim)
+possible[2] = torch.zeros(opt.mb_dim*env.act_dim,env.act_dim)
 for i =1,opt.mb_dim do
     for a = 1,env.act_dim  do
         possible[2][opt.mb_dim*(a-1)+i][a] = 1
     end
 end
-target = torch.zeros(opt.mb_dim,env.act_dim):cuda()
+target = torch.zeros(opt.mb_dim,env.act_dim)
 target_mask = torch.zeros(opt.mb_dim,env.act_dim,1):byte()
-act_grad = torch.zeros(env.act_dim*opt.mb_dim,env.act_dim):cuda()
-aind = torch.LongTensor(opt.mb_dim*env.act_dim,1):cuda()
+act_grad = torch.zeros(env.act_dim*opt.mb_dim,env.act_dim)
+aind = torch.LongTensor(opt.mb_dim*env.act_dim,1)
+if opt.gpu then
+    possible[1] = possible[1]:cuda()
+    possible[2] = possible[2]:cuda()
+    target = target:cuda()
+    act_grad = act_grad:cuda()
+    aind = aind:cuda()
+end
 for a=1,env.act_dim do
     for i=1,opt.mb_dim do
         aind[opt.mb_dim*(a-1)+i] = a
@@ -145,9 +157,12 @@ for t=1,opt.num_steps do
         a = torch.random(env.act_dim)
     else
         if D.num_frames > 1 then
-            full_s = D:get_past(s):cuda()
+            full_s = D:get_past(s)
         else
-            full_s = s:cuda()
+            full_s = s
+        end
+        if opt.gpu then
+            full_s = full_s:cuda()
         end
         local vals = q_network:forward(full_s)
         _,a = vals:max(vals:dim())
@@ -178,9 +193,12 @@ for t=1,opt.num_steps do
         end
         --update Q
         if opt.use_target_network then
-            _,qind = q_network:forward(mb_sPrime):max(2)
-            qPrime = target_network:forward(mb_sPrime):gather(2,qind)
-            --qPrime,qind = target_network:forward(mb_sPrime):max(2)
+            if opt.ddqn then
+                _,qind = q_network:forward(mb_sPrime):max(2)
+                qPrime = target_network:forward(mb_sPrime):gather(2,qind)
+            else
+                qPrime,qind = target_network:forward(mb_sPrime):max(2)
+            end
         else
             qPrime,qind = q_network:forward(mb_sPrime):max(2)
         end

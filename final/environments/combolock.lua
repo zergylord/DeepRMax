@@ -10,7 +10,7 @@ local visits_over_time,visits_over_time_norm,visits_over_time_per_state,visits_o
 function env.setup(params)
     params = params or {}
     env.act_dim = params.actions or 4
-    num_state = params.states or 30
+    num_state = params.states or 10
     env.in_dim = num_state
     env.state_dim = env.in_dim
     num_steps = params.num_steps or 1e6
@@ -111,7 +111,12 @@ function env.get_info(t,reward_hist,network,err_network,pred_network,q_network)
 
     if q_network then
         local Q
-        Q = q_network:forward(env.get_all_states():cuda())
+        local all_s = env.get_all_states()
+        if opt.gpu then
+            all_s = all_s:cuda()
+        end
+        Q = q_network:forward(all_s)
+
         gnuplot.raw("set title 'Q-values' ")
         gnuplot.raw('set xrange [' .. .5 .. ':' .. num_state+.5 .. '] noreverse')
         gnuplot.raw('set yrange [*:*] noreverse')
@@ -157,7 +162,11 @@ function env.get_info(t,reward_hist,network,err_network,pred_network,q_network)
     cur_err = torch.zeros(num_state,env.act_dim)
     cur_actual_err = torch.zeros(num_state,env.act_dim)
 
-    network:forward{all_state:cuda(),all_action:cuda()}
+    if opt.gpu then
+        all_state = all_state:cuda()
+        all_action = all_action:cuda()
+    end
+    network:forward{all_state,all_action}
     cur_pred = pred_network.output:float()
     cur_actual_pred = all_statePrime
     cur_err = get_knownness(err_network.output):reshape(num_state,env.act_dim)

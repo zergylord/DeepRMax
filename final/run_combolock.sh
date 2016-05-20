@@ -4,9 +4,9 @@ args="-update_freq 1
         -refresh 5e2
         -num_steps 1e5
         -use_egreedy
+        -ddqn
         -target_refresh 1e3
-        -learn_start 1
-        -clip_delta
+        -learn_start 321
         -gamma .9
         -environment combolock
         -q_learning_rate 1e-3
