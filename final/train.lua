@@ -75,7 +75,7 @@ end
 q_network = nn.gModule({input},{output})
 q_network = q_network:cuda()
 q_w,q_dw = q_network:getParameters()
-if use_target_network then
+if opt.use_target_network then
     target_network = q_network:clone()
 end
 mse_crit = nn.MSECriterion():cuda()
@@ -228,7 +228,7 @@ for t=1,opt.num_steps do
         end
         --update value function----------------------------
         _,batchloss = optim.adam(q_train,q_w,q_config)
-        if use_target_network and t % opt.target_refresh == 0 then
+        if opt.use_target_network and t % opt.target_refresh == 0 then
             target_network = q_network:clone()
         end
     end
