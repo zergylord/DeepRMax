@@ -9,6 +9,7 @@ args="-update_freq 1
         -clip_delta
         -gamma .9
         -environment combolock
+        -q_learning_rate 1e-3
         -num_frames 1
         "
 th train.lua $args

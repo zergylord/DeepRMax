@@ -26,7 +26,7 @@ cmd:option('-target_refresh',1e4,'how often to copy network into target network'
 cmd:option('-learn_start',5e4,'when to start making weight updates')
 cmd:option('-clip_delta',true,'false or constant value for gradients')
 cmd:option('-gamma',.99,'discount factor')
-cmd:option('-q_learning_rate',1e-3,'learning rate for q network')
+cmd:option('-q_learning_rate',2.5e-4,'learning rate for q network')
 cmd:option('-environment','atari','training task to use')
 cmd:option('-num_frames',4,'number of consequtive frames for input')
 opt = cmd:parse(arg)
@@ -63,7 +63,8 @@ if env.spatial then
     local conv3 = nn.ReLU()(nn.SpatialConvolution(64,64,3,3,1,1)(conv2))
     local conv_dim = 64*7*7
     local last_hid = nn.ReLU()(nn.Linear(conv_dim,512)(nn.View(-1,conv_dim)(conv3)))
-    output = nn.Linear(512,env.act_dim)(last_hid)
+    lin = nn.Linear(512,env.act_dim,false)(last_hid)
+    output = nn.Add(1)(lin)
 else
     print('using mlp')
     local hid_dim = 100
@@ -177,9 +178,9 @@ for t=1,opt.num_steps do
         end
         --update Q
         if use_target_network then
-            --_,qind = q_network:forward(mb_sPrime):max(2)
-            --qPrime = target_network:forward(mb_sPrime):gather(2,qind)
-            qPrime,qind = target_network:forward(mb_sPrime):max(2)
+            _,qind = q_network:forward(mb_sPrime):max(2)
+            qPrime = target_network:forward(mb_sPrime):gather(2,qind)
+            --qPrime,qind = target_network:forward(mb_sPrime):max(2)
         else
             qPrime,qind = q_network:forward(mb_sPrime):max(2)
         end
@@ -232,6 +233,7 @@ for t=1,opt.num_steps do
         end
     end
     if term then
+        print('reseting')
         s = env.reset()
     else
         s = sPrime 
