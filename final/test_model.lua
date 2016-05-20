@@ -9,10 +9,12 @@ input = nn.Identity()()
  conv3 = nn.ReLU()(nn.SpatialConvolution(64,64,3,3,1,1)(conv2))
  conv_dim = 64*7*7
  last_hid = nn.ReLU()(nn.Linear(conv_dim,512)(nn.View(-1,conv_dim)(conv3)))
-output = nn.Linear(512,3)(last_hid)
+    lin = nn.Linear(512,3,false)(last_hid)
+    output = nn.Add(1,true)(lin)
 q_network = nn.gModule({input},{output})
 q_network = q_network:cuda()
 q_w,q_dw = q_network:getParameters()
+--[[
 vid = unpack(torch.load('frames.dat'))
 require 'image'
 q_network:forward(image.scale(vid[{{1,4}}],84,84,'bilinear'):float():div(255):cuda())
@@ -22,3 +24,4 @@ old = q_w:clone()
 q_w = unpack(torch.load('w.t7'))
 q_network:forward(image.scale(vid[{{1,4}}],84,84,'bilinear'):float():div(255):cuda())
 gnuplot.imagesc(just_conv.output[1][1])
+--]]

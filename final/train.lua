@@ -22,7 +22,7 @@ cmd:option('-refresh',1e4,'steps until information is displayed')
 cmd:option('-num_steps',1e7,'total steps to run')
 cmd:option('-use_egreedy',true,'use epsilon greedy action selection')
 cmd:option('-use_target_network',true,'use a target network for updates')
-cmd:option('-target_refresh',1e4,'how often to copy network into target network')
+cmd:option('-target_refresh',3e4,'how often to copy network into target network')
 cmd:option('-learn_start',5e4,'when to start making weight updates')
 cmd:option('-clip_delta',true,'false or constant value for gradients')
 cmd:option('-gamma',.99,'discount factor')
@@ -64,7 +64,7 @@ if env.spatial then
     local conv_dim = 64*7*7
     local last_hid = nn.ReLU()(nn.Linear(conv_dim,512)(nn.View(-1,conv_dim)(conv3)))
     lin = nn.Linear(512,env.act_dim,false)(last_hid)
-    output = nn.Add(1)(lin)
+    output = nn.Add(1,true)(lin)
 else
     print('using mlp')
     local hid_dim = 100
@@ -177,7 +177,7 @@ for t=1,opt.num_steps do
             cumloss = cumloss + batchloss[1]
         end
         --update Q
-        if use_target_network then
+        if opt.use_target_network then
             _,qind = q_network:forward(mb_sPrime):max(2)
             qPrime = target_network:forward(mb_sPrime):gather(2,qind)
             --qPrime,qind = target_network:forward(mb_sPrime):max(2)
@@ -233,7 +233,6 @@ for t=1,opt.num_steps do
         end
     end
     if term then
-        print('reseting')
         s = env.reset()
     else
         s = sPrime 
