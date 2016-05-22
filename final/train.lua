@@ -77,6 +77,7 @@ end
 q_network = nn.gModule({input},{output})
 mse_crit = nn.MSECriterion()
 if opt.gpu then
+    print('using gpu')
     q_network = q_network:cuda()
     mse_crit = mse_crit:cuda()
 end

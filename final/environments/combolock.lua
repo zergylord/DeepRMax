@@ -10,7 +10,7 @@ local visits_over_time,visits_over_time_norm,visits_over_time_per_state,visits_o
 function env.setup(params)
     params = params or {}
     env.act_dim = params.actions or 4
-    num_state = params.states or 10
+    num_state = params.states or 30
     env.in_dim = num_state
     env.state_dim = env.in_dim
     num_steps = params.num_steps or 1e6
@@ -73,7 +73,7 @@ function env.step(a)
     if sPrime == num_state then
         r = 1
     end
-    return r,S[sPrime],sPrime==num_state
+    return r,S[sPrime],s==num_state
 end
 --[[
 --returns one-hot vector for action a
