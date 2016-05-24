@@ -169,22 +169,23 @@ for t=1,opt.num_steps do
         _,a = vals:max(vals:dim())
         a = a:squeeze()
     end
+    for i =1,opt.update_freq do
+        --perform action
+        r,sPrime,term = env.step(a)
+        if r > 0 then
+            r = 1
+        elseif r< 0 then
+            r = -1
+        end
+        net_reward = net_reward + r
 
-    --perform action
-    r,sPrime,term = env.step(a)
-    if r > 0 then
-        r = 1
-    elseif r< 0 then
-        r = -1
+
+        --record history
+        D:add(s,a,r,term)
     end
-    net_reward = net_reward + r
-
-
-    --record history
-    D:add(s,a,r,term)
 
     --update model params
-    if t > opt.learn_start and t % opt.update_freq == 0 then
+    if t > opt.learn_start then
         --gotta re-perm if runnning train_dis multiple times
         mb_s,mb_a,mb_r,mb_sPrime,mb_term = D:get_samples(opt.mb_dim)
         if opt.use_rmax then
