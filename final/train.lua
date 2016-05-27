@@ -23,7 +23,7 @@ cmd:option('-num_steps',1e7,'total steps to run')
 cmd:option('-use_egreedy',true,'use epsilon greedy action selection')
 cmd:option('-use_target_network',true,'use a target network for updates')
 cmd:option('-target_refresh',3e4,'how often to copy network into target network')
-cmd:option('-learn_start',5e4,'when to start making weight updates')
+cmd:option('-learn_start',1.25e4,'when to start making weight updates')
 cmd:option('-clip_delta',true,'false or constant value for gradients')
 cmd:option('-gamma',.99,'discount factor')
 cmd:option('-q_learning_rate',2.5e-4,'learning rate for q network')
@@ -152,24 +152,24 @@ end
 cumloss =0 
 s = env.reset()
 for t=1,opt.num_steps do
-    r = 0
-    --select action
-    if (opt.use_egreedy and torch.rand(1)[1] < epsilon[t]) or (t <= opt.learn_start) then
-        a = torch.random(env.act_dim)
-    else
-        if D.num_frames > 1 then
-            full_s = D:get_past(s)
-        else
-            full_s = s
-        end
-        if opt.gpu then
-            full_s = full_s:cuda()
-        end
-        local vals = q_network:forward(full_s)
-        _,a = vals:max(vals:dim())
-        a = a:squeeze()
-    end
     for i =1,opt.update_freq do
+        r = 0
+        --select action
+        if (opt.use_egreedy and torch.rand(1)[1] < epsilon[t]) or (t <= opt.learn_start) then
+            a = torch.random(env.act_dim)
+        else
+            if D.num_frames > 1 then
+                full_s = D:get_past(s)
+            else
+                full_s = s
+            end
+            if opt.gpu then
+                full_s = full_s:cuda()
+            end
+            local vals = q_network:forward(full_s)
+            _,a = vals:max(vals:dim())
+            a = a:squeeze()
+        end
         --perform action
         r,sPrime,term = env.step(a)
         if r > 0 then

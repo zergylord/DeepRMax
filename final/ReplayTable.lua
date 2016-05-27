@@ -95,7 +95,7 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
             if not zero then
                 frames[{{(i-1)*D.state_dim+1,i*D.state_dim}}] = D.s[ind+i-1]
             end
-            if i<D.num_frames and D.term[ind+i-1] == 1 then
+            if D.term[ind+i-1] == 1 then
                 zero = true
             end
         end
@@ -116,8 +116,17 @@ function ReplayTable.init(state_dim,num_frames,byte_storage)
         end
     end
     function D.sample_one(D)
-        local ind = torch.random(D.fill-D.num_frames)
-        return D:get_future(ind),D:get_future(ind+1),D.a[ind],D.r[ind],D.term[ind]
+        local valid = false
+        local ind --index of least recent past thats still relevant
+        while not valid do
+            ind = torch.random(2,D.fill-D.num_frames)
+            --ind can't be term, since the reward comes the step before that
+            if D.term[ind+D.num_frames-1] == 0 then
+                valid = true
+            end
+        end
+        local ar_ind = ind+D.num_frames-1
+        return D:get_future(ind),D:get_future(ind+1),D.a[ar_ind],D.r[ar_ind],D.term[ar_ind+1]
     end
 
 

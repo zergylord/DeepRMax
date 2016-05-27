@@ -2,7 +2,7 @@ env = {}
 local alewrap = require 'alewrap'
 local validA,num_steps,refresh
 require '../Scale'
-local prep = nn.Scale(84,84)
+local prep = nn.Scale(84,84,true)
 local H,last_obs
 --[[
 --param table options:
@@ -38,14 +38,14 @@ end
 --]]
 function env.reset()
     local screen = game:nextRandomGame() --newGame()
-    return prep:forward(screen[1]):view(env.state_dim)
+    return prep:forward(screen):view(env.state_dim)
 end
 --[[
 --returns observation and exact state
 --]]
 function env.step(a)
     local nextScreen,r,term = game:step(validA[a])
-    local frame = prep:forward(nextScreen[1]):view(env.state_dim)
+    local frame = prep:forward(nextScreen):view(env.state_dim)
     if record > 0 then
         vid[100-record+1]:copy(frame)
         record = record -1
